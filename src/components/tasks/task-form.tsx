@@ -87,12 +87,22 @@ export function TaskForm() {
   const [selectedChannels, _setSelectedChannels] = useState<string[]>([]);
   const [defaultsApplied, setDefaultsApplied] = useState(false);
 
-  // Persist channel selection to localStorage
+  // Persist channel selection to localStorage — save both IDs and names for resilience
   const STORAGE_KEY = "task-tracker:selected-channels";
-  const setSelectedChannels: typeof _setSelectedChannels = (value) => {
+  const STORAGE_KEY_NAMES = "task-tracker:selected-channel-names";
+  const setSelectedChannels = (value: string[] | ((prev: string[]) => string[])) => {
     _setSelectedChannels((prev) => {
       const next = typeof value === "function" ? value(prev) : value;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        // Also save channel names for resilience (IDs may change between server restarts)
+        const names = next
+          .map((id) => slackChannels.find((ch) => ch.id === id)?.name)
+          .filter(Boolean);
+        if (names.length > 0) {
+          localStorage.setItem(STORAGE_KEY_NAMES, JSON.stringify(names));
+        }
+      } catch {}
       return next;
     });
   };
@@ -174,11 +184,28 @@ export function TaskForm() {
           if (saved) {
             const ids = JSON.parse(saved) as string[];
             // Validate that saved IDs still exist in current channel list
-            const validIds = channels.map((ch: SlackChannel) => ch.id);
-            const filtered = ids.filter((id) => validIds.includes(id));
+            const validIds = new Set(channels.map((ch: SlackChannel) => ch.id));
+            const filtered = ids.filter((id) => validIds.has(id));
             if (filtered.length > 0) {
               _setSelectedChannels(filtered);
               restored = true;
+            }
+          }
+          // If IDs didn't match (e.g. server restart changed cache), try restoring by name
+          if (!restored) {
+            const savedNames = localStorage.getItem(STORAGE_KEY_NAMES);
+            if (savedNames) {
+              const names = JSON.parse(savedNames) as string[];
+              const nameSet = new Set(names);
+              const matchedIds = channels
+                .filter((ch: SlackChannel) => nameSet.has(ch.name))
+                .map((ch: SlackChannel) => ch.id);
+              if (matchedIds.length > 0) {
+                _setSelectedChannels(matchedIds);
+                // Update ID cache with the new IDs
+                try { localStorage.setItem(STORAGE_KEY, JSON.stringify(matchedIds)); } catch {}
+                restored = true;
+              }
             }
           }
         } catch {}
@@ -187,7 +214,13 @@ export function TaskForm() {
             .filter((ch: SlackChannel) => DEFAULT_ACTIVE_CHANNELS.includes(ch.name))
             .map((ch: SlackChannel) => ch.id);
           _setSelectedChannels(defaultIds);
-          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultIds)); } catch {}
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultIds));
+            const defaultNames = channels
+              .filter((ch: SlackChannel) => DEFAULT_ACTIVE_CHANNELS.includes(ch.name))
+              .map((ch: SlackChannel) => ch.name);
+            localStorage.setItem(STORAGE_KEY_NAMES, JSON.stringify(defaultNames));
+          } catch {}
         }
         setDefaultsApplied(true);
       }
