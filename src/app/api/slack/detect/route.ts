@@ -64,17 +64,39 @@ export async function POST(req: Request) {
 
       const aiItems = await aiParseText(combinedText);
       if (aiItems !== null) {
-        items = aiItems.map((item) => ({
-          description: item.description,
-          suggestedOwner: item.suggestedOwner,
-          suggestedDeadline: item.suggestedDeadline,
-          suggestedPriority: item.suggestedPriority,
-          confidence: item.confidence,
-          sender: null,
-          timestamp: null,
-          ownerGroup: null,
-          title: item.title,
-        }));
+        items = aiItems.map((item) => {
+          // Match AI-extracted item back to original message for timestamp/sender
+          const descNorm = item.description.toLowerCase().replace(/\s+/g, " ").trim();
+          let match = messages.find((m) => {
+            if (!m.text) return false;
+            const mNorm = m.text.toLowerCase().replace(/\s+/g, " ").trim();
+            return mNorm === descNorm || mNorm.includes(descNorm) || descNorm.includes(mNorm);
+          });
+          // Fallback: word overlap matching
+          if (!match) {
+            const descWords = new Set(descNorm.split(/\s+/).filter((w) => w.length > 3));
+            let bestScore = 0;
+            for (const m of messages) {
+              if (!m.text) continue;
+              const mWords = new Set(m.text.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3));
+              let shared = 0;
+              for (const w of descWords) if (mWords.has(w)) shared++;
+              const score = descWords.size > 0 ? shared / descWords.size : 0;
+              if (score > bestScore && score >= 0.5) { bestScore = score; match = m; }
+            }
+          }
+          return {
+            description: item.description,
+            suggestedOwner: item.suggestedOwner || (match?.user ?? null),
+            suggestedDeadline: item.suggestedDeadline,
+            suggestedPriority: item.suggestedPriority,
+            confidence: item.confidence,
+            sender: match?.user ?? null,
+            timestamp: match?.ts ?? null,
+            ownerGroup: null,
+            title: item.title,
+          };
+        });
         parser = "ai";
       } else {
         items = scoreSlackMessages(messages);
