@@ -793,9 +793,15 @@ export function TaskForm() {
 
           {parsedItems.length > 0 && (() => {
             const confidenceOrder = { high: 0, medium: 1, low: 2 };
-            const sorted = [...parsedItems].sort(
-              (a, b) => (confidenceOrder[a.confidence as keyof typeof confidenceOrder] ?? 2) - (confidenceOrder[b.confidence as keyof typeof confidenceOrder] ?? 2)
-            );
+            const sorted = [...parsedItems].sort((a, b) => {
+              // Primary: confidence (high → medium → low)
+              const confDiff = (confidenceOrder[a.confidence as keyof typeof confidenceOrder] ?? 2) - (confidenceOrder[b.confidence as keyof typeof confidenceOrder] ?? 2);
+              if (confDiff !== 0) return confDiff;
+              // Secondary: most recent timestamp first
+              const tsA = a.timestamp ? parseFloat(a.timestamp) : 0;
+              const tsB = b.timestamp ? parseFloat(b.timestamp) : 0;
+              return tsB - tsA;
+            });
 
             // Group by ownerGroup if present (structured notes)
             const hasGroups = sorted.some((item) => item.ownerGroup);
