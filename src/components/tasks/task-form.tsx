@@ -333,8 +333,8 @@ export function TaskForm() {
     setForm((f) => {
       const updates: Partial<typeof f> = {};
 
-      // Title — smart concise subject; Description — full humanized text
-      updates.title = generateTitle(desc);
+      // Title — use AI-generated title if available, fall back to regex
+      updates.title = (item.title as string) || generateTitle(desc);
       updates.description = desc;
 
       // Deadline

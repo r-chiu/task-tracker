@@ -4,6 +4,7 @@ import { resolveSlackUser } from "@/lib/slack-user-resolver";
 import { slackClient, sendSlackMessage } from "@/lib/slack";
 import { buildTaskModal, buildTaskConfirmationBlocks, buildErrorBlocks } from "@/lib/slack-blocks";
 import { generateTitle } from "@/lib/slack-parser";
+import { aiGenerateTitle } from "@/lib/ai-parser";
 import { prisma } from "@/lib/prisma";
 import { PRIORITY_LABELS } from "@/lib/constants";
 
@@ -118,7 +119,7 @@ export async function POST(req: Request) {
     const deadline = parsed.deadline || getEndOfWeek();
 
     // Generate smart title
-    const title = generateTitle(parsed.description);
+    const title = (await aiGenerateTitle(parsed.description)) || generateTitle(parsed.description);
 
     // Create the task
     const deadlineDate = new Date(deadline + "T23:59:59.000Z");

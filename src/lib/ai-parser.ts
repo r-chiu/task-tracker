@@ -16,15 +16,16 @@ const SYSTEM_PROMPT = `You are a task extraction assistant for a corporate task 
 Rules:
 1. If the text describes one or more tasks/action items, extract each one.
 2. A task is anything someone needs to DO — it doesn't need specific keywords or verbs.
-3. Generate a concise title (under 70 characters) for each task.
+3. For the title field: use 3-7 words in "Verb + object" format. Keep it specific. No punctuation unless necessary.
 4. Suggest priority: CRITICAL (urgent/blocking), HIGH (important/time-sensitive), MEDIUM (normal), LOW (no rush).
 5. If a person's name is mentioned as the one who should do it, set them as suggestedOwner.
 6. If a deadline/date is mentioned, extract it in YYYY-MM-DD format. For relative dates like "next Friday", resolve based on today's date provided in the prompt.
 7. Set confidence: "high" if it's clearly a task, "medium" if likely, "low" if ambiguous.
 8. If the text contains NO actionable items (just a question, greeting, or status update with nothing to do), return an empty array.
+9. If multiple tasks exist in the same text block, extract each as a separate item.
 
 Respond ONLY with valid JSON — no markdown, no explanation. Format:
-{ "items": [ { "description": "full original text for this task", "title": "concise title", "suggestedOwner": "name or null", "suggestedDeadline": "YYYY-MM-DD or null", "suggestedPriority": "MEDIUM", "confidence": "high" } ] }`;
+{ "items": [ { "description": "full original text for this task", "title": "3-7 word verb+object title", "suggestedOwner": "name or null", "suggestedDeadline": "YYYY-MM-DD or null", "suggestedPriority": "MEDIUM", "confidence": "high" } ] }`;
 
 /**
  * Use Claude AI to detect and extract action items from text.
@@ -72,6 +73,22 @@ export async function aiParseText(text: string): Promise<AIParsedItem[] | null> 
   }
 }
 
+const TITLE_PROMPT = `Analyze the text and identify the single main actionable task.
+
+Output JSON only:
+{
+  "task_name": "<3-7 word concise task title>"
+}
+
+Rules:
+- Prefer format: Verb + object
+- Keep it specific
+- No punctuation unless necessary
+- No explanation
+- If multiple tasks exist, choose the highest-priority one
+- If no action exists, summarize the main topic
+- Never return anything except valid JSON`;
+
 /**
  * Use Claude AI to generate a concise task title from a description.
  * Returns null if unavailable, so callers can fall back to regex-based title generation.
@@ -83,17 +100,18 @@ export async function aiGenerateTitle(description: string): Promise<string | nul
     const response = await client.messages.create({
       model: "claude-haiku-4-20250414",
       max_tokens: 100,
-      system:
-        "Generate a concise task title (under 70 characters) from the given task description. Return ONLY the title text, nothing else. Capitalize the first letter. Do not include quotes.",
+      system: TITLE_PROMPT,
       messages: [
-        { role: "user", content: description },
+        { role: "user", content: `Text:\n${description}` },
       ],
     });
 
     const content = response.content[0];
     if (content.type !== "text") return null;
 
-    const title = content.text.trim().replace(/^["']|["']$/g, "");
+    // Parse JSON response
+    const parsed = JSON.parse(content.text.trim());
+    const title = (parsed.task_name || "").trim().replace(/^["']|["']$/g, "");
     return title.length > 0 ? title : null;
   } catch (err) {
     console.error("AI title generation error:", err);
