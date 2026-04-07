@@ -140,25 +140,28 @@ export default function DashboardPage() {
         onChange={(key, value) => setFilters((f) => ({ ...f, [key]: value }))}
         onClear={() => setFilters(defaultFilters)}
       />
-      <div className="-mb-4 flex items-center justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleSendReminders}
-          disabled={sendingReminders}
-        >
-          <AlarmClock className="mr-2 h-4 w-4" />
-          {sendingReminders ? "Sending..." : "Send All Reminders"}
-        </Button>
-      </div>
-      <TaskTable
-        tasks={activeTasks}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium text-muted-foreground">Active Tasks</h2>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSendReminders}
+            disabled={sendingReminders}
+          >
+            <AlarmClock className="mr-2 h-4 w-4" />
+            {sendingReminders ? "Sending..." : "Send All Reminders"}
+          </Button>
+        </div>
+        <TaskTable
+          tasks={activeTasks}
         sortBy={sortBy}
         sortOrder={sortOrder}
         onSort={handleSort}
         onDelete={() => fetchTasks()}
         onStatusChange={handleStatusChange}
-      />
+        />
+      </div>
 
       {/* Completed / Cancelled tasks */}
       {completedTasks.length > 0 && (
