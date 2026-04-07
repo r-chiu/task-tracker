@@ -71,6 +71,15 @@ export default function DashboardPage() {
     }
   };
 
+  const activeTasks = useMemo(
+    () => tasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED"),
+    [tasks]
+  );
+  const completedTasks = useMemo(
+    () => tasks.filter((t) => t.status === "COMPLETED" || t.status === "CANCELLED"),
+    [tasks]
+  );
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -84,15 +93,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  const activeTasks = useMemo(
-    () => tasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED"),
-    [tasks]
-  );
-  const completedTasks = useMemo(
-    () => tasks.filter((t) => t.status === "COMPLETED" || t.status === "CANCELLED"),
-    [tasks]
-  );
 
   const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
     try {
