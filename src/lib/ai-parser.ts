@@ -84,7 +84,9 @@ Rules:
   4. First actionable item mentioned
 - If there is no clear action, return the main topic as a short noun phrase
 - Avoid generic outputs like "Review task", "Handle issue", "General follow-up"
-- Never return anything except valid JSON`;
+
+You MUST respond with ONLY valid JSON in this exact format: {"task_name": "your task name here"}
+Never return anything else.`;
 
 async function titleViaOllama(description: string): Promise<string | null> {
   try {
@@ -127,11 +129,15 @@ async function titleViaOllama(description: string): Promise<string | null> {
 // GROQ (FREE CLOUD LLM) FALLBACK
 // ============================================================================
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 
+function getGroqKey(): string | undefined {
+  return process.env.GROQ_API_KEY;
+}
+
 async function titleViaGroq(description: string): Promise<string | null> {
-  if (!GROQ_API_KEY) return null;
+  const GROQ_API_KEY = getGroqKey();
+  if (!GROQ_API_KEY) { console.error("[Groq] No API key"); return null; }
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -143,7 +149,7 @@ async function titleViaGroq(description: string): Promise<string | null> {
         model: GROQ_MODEL,
         messages: [
           { role: "system", content: OLLAMA_TITLE_PROMPT },
-          { role: "user", content: `Text:\n${description}` },
+          { role: "user", content: `Analyze this text and return {"task_name": "..."} with a 3-7 word task title:\n\n${description}` },
         ],
         temperature: 0,
         max_tokens: 100,
@@ -152,10 +158,24 @@ async function titleViaGroq(description: string): Promise<string | null> {
       signal: AbortSignal.timeout(10000),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("[Groq] API error:", res.status, body);
+      // If JSON validation failed, try to extract from failed_generation
+      try {
+        const errData = JSON.parse(body);
+        const failed = errData?.error?.failed_generation;
+        if (failed) {
+          // Try to extract any reasonable string from the failed output
+          const cleaned = failed.replace(/[{}"'\n]/g, "").trim();
+          if (cleaned && cleaned.length > 2 && cleaned.length < 80) return cleaned;
+        }
+      } catch {}
+      return null;
+    }
     const data = await res.json();
     const text = data?.choices?.[0]?.message?.content?.trim();
-    if (!text) return null;
+    if (!text) { console.error("[Groq] Empty response"); return null; }
 
     const parsed = JSON.parse(text);
     return (parsed.task_name || "").trim() || null;
@@ -166,6 +186,7 @@ async function titleViaGroq(description: string): Promise<string | null> {
 }
 
 async function parseViaGroq(text: string): Promise<AIParsedItem[] | null> {
+  const GROQ_API_KEY = getGroqKey();
   if (!GROQ_API_KEY) return null;
   try {
     const today = new Date().toISOString().split("T")[0];
