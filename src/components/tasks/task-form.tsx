@@ -398,10 +398,13 @@ export function TaskForm() {
         hash: await hashContent(item.description || ""),
       }))
     );
-    // Check which are dismissed
+    // Check which are dismissed — pass both hashes and descriptions for fuzzy matching
     const hashes = hashPairs.map((p) => p.hash).join(",");
+    const descriptions = hashPairs.map((p) => (p.item.description || "").slice(0, 500)).join("|||");
     try {
-      const res = await fetch(`/api/action-items?hashes=${hashes}`);
+      const res = await fetch(
+        `/api/action-items?hashes=${hashes}&descriptions=${encodeURIComponent(descriptions)}`
+      );
       const data = await res.json();
       const dismissed: Record<string, string> = data.dismissed || {};
       setDismissedHashes((prev) => ({ ...prev, ...dismissed }));
