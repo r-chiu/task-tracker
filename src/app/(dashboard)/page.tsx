@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { TaskStatus } from "@/lib/constants";
 import { toast } from "sonner";
-import { Bell } from "lucide-react";
+import { Clock } from "lucide-react";
 
 interface Filters {
   search: string;
@@ -105,17 +105,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <Button
-          variant="outline"
-          onClick={handleSendReminders}
-          disabled={sendingReminders}
-        >
-          <Bell className="mr-2 h-4 w-4" />
-          {sendingReminders ? "Sending..." : "Send All Reminders"}
-        </Button>
-      </div>
       <TaskSummaryCards data={summary} />
       <TaskFilters
         filters={filters}
@@ -123,6 +112,17 @@ export default function DashboardPage() {
         onChange={(key, value) => setFilters((f) => ({ ...f, [key]: value }))}
         onClear={() => setFilters(defaultFilters)}
       />
+      <div className="-mb-4 flex items-center justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleSendReminders}
+          disabled={sendingReminders}
+        >
+          <Clock className="mr-2 h-4 w-4" />
+          {sendingReminders ? "Sending..." : "Send All Reminders"}
+        </Button>
+      </div>
       <TaskTable
         tasks={tasks}
         sortBy={sortBy}
