@@ -186,10 +186,10 @@ async function _fetchChannelsFromSlack() {
   }
 
   // Fetch group DMs (mpim) — requires mpim:read scope
-  // Only show recently active ones (last 30 days) to keep the list manageable
+  // Show recently active ones (last 90 days) with proper member names
   const raySlackId = process.env.RAY_SLACK_USER_ID;
   try {
-    const allGroupDms: { id: string; name: string; updated: number }[] = [];
+    const allGroupDms: { id: string; name: string; members?: string[]; updated: number }[] = [];
     let mpimCursor: string | undefined;
     do {
       const result = await slackUser.conversations.list({
@@ -200,24 +200,26 @@ async function _fetchChannelsFromSlack() {
       });
       for (const ch of result.channels ?? []) {
         if (ch.id) {
-          const name = ch.purpose?.value || ch.name || ch.id;
-          allGroupDms.push({ id: ch.id, name, updated: ch.updated ?? 0 });
+          allGroupDms.push({
+            id: ch.id,
+            name: ch.purpose?.value || ch.name || ch.id,
+            updated: ch.updated ?? 0,
+          });
         }
       }
       mpimCursor = result.response_metadata?.next_cursor || undefined;
     } while (mpimCursor);
 
-    // Filter: only group DMs with activity in the last 30 days
-    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
-    let recentDms = allGroupDms.filter((dm) => dm.updated > thirtyDaysAgo);
+    // Filter: group DMs with activity in the last 90 days
+    const ninetyDaysAgo = Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60;
+    let recentDms = allGroupDms.filter((dm) => dm.updated > ninetyDaysAgo);
 
     // Sort by most recently active first
     recentDms.sort((a, b) => b.updated - a.updated);
 
     // If Ray's Slack ID is configured, boost DMs where Ray was recently active
-    if (raySlackId && recentDms.length > 20) {
-      // Sample up to 20 recent DMs — check in parallel (5 at a time) for speed
-      const toCheck = recentDms.slice(0, 20);
+    if (raySlackId && recentDms.length > 30) {
+      const toCheck = recentDms.slice(0, 30);
       const results = await Promise.allSettled(
         toCheck.map(async (dm) => {
           const hist = await slackUser.conversations.history({ channel: dm.id, limit: 5 });
@@ -236,17 +238,49 @@ async function _fetchChannelsFromSlack() {
         }
       }
 
-      // Ray's active DMs first, then others, then any remaining beyond checked set
       recentDms = [
         ...rayActiveDms,
         ...otherDms,
-        ...recentDms.slice(20),
+        ...recentDms.slice(30),
       ];
     }
 
-    // Cap at 25 group DMs max to keep the UI clean
-    for (const dm of recentDms.slice(0, 25)) {
-      channels.push({ id: dm.id, name: dm.name, type: "group_dm" });
+    // Pre-load all workspace members for fast name resolution
+    const { prisma: _prisma } = await import("@/lib/prisma");
+    const allMembers = await _prisma.slackMember.findMany({
+      where: { isActive: true, isBot: false },
+      select: { slackId: true, displayName: true, realName: true },
+    });
+    const memberNameMap = new Map<string, string>();
+    for (const m of allMembers) {
+      memberNameMap.set(m.slackId, m.displayName || m.realName || m.slackId);
+    }
+
+    // Resolve member names for each group DM (cap at 40 DMs)
+    const dmsToResolve = recentDms.slice(0, 40);
+    const resolvedDms = await Promise.allSettled(
+      dmsToResolve.map(async (dm) => {
+        try {
+          const info = await slackUser.conversations.members({ channel: dm.id, limit: 20 });
+          const memberIds = (info.members ?? []).filter((id) => id !== raySlackId);
+          // Resolve IDs to display names from cached members
+          const memberNames = memberIds
+            .map((mid) => memberNameMap.get(mid) || mid)
+            .filter(Boolean);
+          const friendlyName = memberNames.length > 0
+            ? memberNames.join(", ")
+            : dm.name;
+          return { ...dm, name: friendlyName };
+        } catch {
+          return dm;
+        }
+      })
+    );
+
+    for (const r of resolvedDms) {
+      if (r.status === "fulfilled") {
+        channels.push({ id: r.value.id, name: r.value.name, type: "group_dm" });
+      }
     }
   } catch {
     // mpim:read scope may not be granted — skip silently
