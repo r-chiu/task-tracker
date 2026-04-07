@@ -186,10 +186,11 @@ async function _fetchChannelsFromSlack() {
   }
 
   // Fetch group DMs (mpim) — requires mpim:read scope
-  // Show recently active ones (last 90 days) with proper member names
+  // Note: Slack's `updated` field on mpim is unreliable, so we check actual
+  // message history to find recently active DMs.
   const raySlackId = process.env.RAY_SLACK_USER_ID;
   try {
-    const allGroupDms: { id: string; name: string; members?: string[]; updated: number }[] = [];
+    const allGroupDms: { id: string; name: string }[] = [];
     let mpimCursor: string | undefined;
     do {
       const result = await slackUser.conversations.list({
@@ -202,48 +203,45 @@ async function _fetchChannelsFromSlack() {
         if (ch.id) {
           allGroupDms.push({
             id: ch.id,
-            name: ch.purpose?.value || ch.name || ch.id,
-            updated: ch.updated ?? 0,
+            name: ch.name || ch.id,
           });
         }
       }
       mpimCursor = result.response_metadata?.next_cursor || undefined;
     } while (mpimCursor);
 
-    // Filter: group DMs with activity in the last 90 days
-    const ninetyDaysAgo = Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60;
-    let recentDms = allGroupDms.filter((dm) => dm.updated > ninetyDaysAgo);
+    // Check actual message history to find recently active DMs (last 90 days)
+    // Process in batches of 10 to stay within rate limits
+    const ninetyDaysAgo = String(Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60);
+    const recentDms: { id: string; name: string; lastTs: number }[] = [];
 
-    // Sort by most recently active first
-    recentDms.sort((a, b) => b.updated - a.updated);
-
-    // If Ray's Slack ID is configured, boost DMs where Ray was recently active
-    if (raySlackId && recentDms.length > 30) {
-      const toCheck = recentDms.slice(0, 30);
+    for (let i = 0; i < allGroupDms.length; i += 10) {
+      const batch = allGroupDms.slice(i, i + 10);
       const results = await Promise.allSettled(
-        toCheck.map(async (dm) => {
-          const hist = await slackUser.conversations.history({ channel: dm.id, limit: 5 });
-          const rayActive = (hist.messages ?? []).some((m) => m.user === raySlackId);
-          return { dm, rayActive };
+        batch.map(async (dm) => {
+          const hist = await slackUser.conversations.history({
+            channel: dm.id,
+            limit: 1,
+            oldest: ninetyDaysAgo,
+          });
+          const lastMsg = hist.messages?.[0];
+          if (lastMsg?.ts) {
+            return { ...dm, lastTs: parseFloat(lastMsg.ts) };
+          }
+          return null;
         })
       );
-
-      const rayActiveDms: typeof recentDms = [];
-      const otherDms: typeof recentDms = [];
       for (const r of results) {
-        if (r.status === "fulfilled" && r.value.rayActive) {
-          rayActiveDms.push(r.value.dm);
-        } else if (r.status === "fulfilled") {
-          otherDms.push(r.value.dm);
+        if (r.status === "fulfilled" && r.value) {
+          recentDms.push(r.value);
         }
       }
-
-      recentDms = [
-        ...rayActiveDms,
-        ...otherDms,
-        ...recentDms.slice(30),
-      ];
+      // Stop early if we have enough — 50 recent DMs is plenty
+      if (recentDms.length >= 50) break;
     }
+
+    // Sort by most recent message first
+    recentDms.sort((a, b) => b.lastTs - a.lastTs);
 
     // Pre-load all workspace members for fast name resolution
     const { prisma: _prisma } = await import("@/lib/prisma");
@@ -256,14 +254,13 @@ async function _fetchChannelsFromSlack() {
       memberNameMap.set(m.slackId, m.displayName || m.realName || m.slackId);
     }
 
-    // Resolve member names for each group DM (cap at 40 DMs)
-    const dmsToResolve = recentDms.slice(0, 40);
+    // Resolve member names for each group DM (cap at 50 DMs)
+    const dmsToResolve = recentDms.slice(0, 50);
     const resolvedDms = await Promise.allSettled(
       dmsToResolve.map(async (dm) => {
         try {
           const info = await slackUser.conversations.members({ channel: dm.id, limit: 20 });
           const memberIds = (info.members ?? []).filter((id) => id !== raySlackId);
-          // Resolve IDs to display names from cached members
           const memberNames = memberIds
             .map((mid) => memberNameMap.get(mid) || mid)
             .filter(Boolean);
