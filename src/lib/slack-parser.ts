@@ -244,7 +244,7 @@ function parseStructuredText(text: string): ParsedActionItem[] {
 // ============================================================================
 
 const ACTION_VERBS =
-  /\b(?:please|pls|need\s+to|must|should|have\s+to|make\s+sure|ensure|follow[- ]?up|send|submit|prepare|review|update|finalize|confirm|complete|finish|deliver|schedule|arrange|set\s+up|coordinate|check|handle|resolve|fix|address|prioritize|assign|create|draft|approve|sign|share|forward|respond|reply|reach\s+out|contact|call|meet|discuss|plan|organize|provide|report|investigate|escalate)\b/i;
+  /\b(?:please|pls|need\s+to|must|should|have\s+to|make\s+sure|ensure|follow[- ]?up|send|submit|prepare|review|update|finalize|confirm|complete|finish|deliver|schedule|arrange|set\s+up|coordinate|check|handle|resolve|fix|address|prioritize|assign|create|draft|approve|sign|share|forward|respond|reply|reach\s+out|contact|call|meet|discuss|plan|organize|provide|report|investigate|escalate|tag|link|track|upload|download|move|transfer|collect|gather|compile|verify|validate|process|analyze|audit|monitor|configure|install|deploy|migrate|archive|backup|document|register|onboard|evaluate|implement|integrate|notify|inform|announce|publish|release|setup|clean\s*up|sort|label|categorize|catalog|inventory|map|align|sync|connect|attach|embed|log|record|file|scan|print|ship|pack|order|book|reserve|purchase|procure|source|negotiate|approve|reject|assess|benchmark|measure|test|debug|patch|refactor|optimize|design|prototype|mock\s*up|wireframe|sketch|outline|summarize|transcribe|translate|convert|format|rename|restructure|consolidate|merge|split|separate|filter|export|import|index|list|tally|count|reconcile|cross[- ]?reference|flag|mark|stamp|note|annotate|highlight|pin|bookmark|snapshot|clone|replicate|duplicate|mirror|route|dispatch|distribute|delegate|elevate|downgrade|reclassify|resubmit|refile|reissue|reassign)\b/i;
 
 const DEADLINE_WORDS =
   /\b(?:by\s+(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|eod|end\s+of|next\s+week|next\s+month)|deadline|due\s+(?:date|by|on)|asap|urgent|immediately|before\s+(?:the\s+)?meeting|this\s+week|this\s+month|end\s+of\s+(?:day|week|month)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}|\d{1,2}\/\d{1,2})\b/i;
@@ -262,12 +262,20 @@ const PRIORITY_PATTERNS: { pattern: RegExp; priority: "CRITICAL" | "HIGH" | "LOW
   { pattern: /\b(?:low\s*priority|whenever|no\s*rush|when\s*you\s*(?:get\s*a\s*)?chance|not\s+urgent|fyi\s+only)\b/i, priority: "LOW" },
 ];
 
+/** Detect "To [verb] ..." pattern — a very common way to describe tasks */
+const TO_VERB_PATTERN =
+  /^to\s+[a-z]+\b/i;
+
 function scoreMessage(text: string): number {
   if (!text || text.trim().length < 15) return 0;
   if (TRIVIAL.test(text.trim())) return 0;
   if (QUESTION_ONLY.test(text.trim()) && text.length < 80) return 0;
 
   let score = 0;
+
+  // "To [verb] ..." is a strong task signal (e.g. "To tag the litter and link it...")
+  if (TO_VERB_PATTERN.test(text.trim())) score += 5;
+
   const actionMatches = text.match(new RegExp(ACTION_VERBS.source, "gi"));
   if (actionMatches) score += Math.min(actionMatches.length * 3, 9);
   if (DEADLINE_WORDS.test(text)) score += 4;
@@ -406,9 +414,20 @@ const IMPERATIVE_VERBS = new Set([
   "remind", "notify", "inform", "discuss", "present", "demo", "test", "deploy",
   "push", "pull", "merge", "build", "run", "start", "stop", "cancel", "close",
   "open", "read", "write", "print", "order", "pay", "transfer", "clean", "file",
+  "tag", "link", "track", "upload", "download", "collect", "gather", "compile",
+  "verify", "validate", "process", "analyze", "audit", "monitor", "configure",
+  "install", "migrate", "archive", "backup", "document", "register", "evaluate",
+  "implement", "integrate", "publish", "release", "sort", "label", "categorize",
+  "catalog", "inventory", "map", "align", "sync", "connect", "attach", "log",
+  "record", "scan", "ship", "pack", "reserve", "purchase", "procure", "source",
+  "negotiate", "assess", "measure", "debug", "patch", "refactor", "optimize",
+  "design", "prototype", "outline", "summarize", "transcribe", "translate",
+  "convert", "format", "rename", "restructure", "consolidate", "split",
+  "separate", "filter", "export", "import", "index", "list", "reconcile",
+  "flag", "mark", "stamp", "note", "annotate", "highlight", "pin",
 ]);
 
-/** Phrases to strip from the beginning (person + action verb prefix) */
+/** Phrases to strip from the beginning (person + action verb prefix, or bare "To [verb]") */
 const PERSON_PREFIX =
   /^(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+)?(?:to|should|will|needs?\s+to|must|has\s+to|is\s+going\s+to|would\s+like\s+to|wants?\s+to)\s+/i;
 
