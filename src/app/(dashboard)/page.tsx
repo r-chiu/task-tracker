@@ -113,7 +113,7 @@ export default function DashboardPage() {
           disabled={sendingReminders}
         >
           <Bell className="mr-2 h-4 w-4" />
-          {sendingReminders ? "Sending..." : "Send Reminders"}
+          {sendingReminders ? "Sending..." : "Send All Reminders"}
         </Button>
       </div>
       <TaskSummaryCards data={summary} />

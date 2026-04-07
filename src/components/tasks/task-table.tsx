@@ -15,7 +15,7 @@ import { TaskPriorityBadge } from "./task-priority-badge";
 import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { TAIPEI_TIMEZONE, STATUS_LABELS, TaskStatus } from "@/lib/constants";
-import { ArrowUpDown, Trash2 } from "lucide-react";
+import { ArrowUpDown, Bell, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -186,7 +186,7 @@ export function TaskTable({
               <TableHead className="w-[11%]">
                 <SortHeader field="createdAt">Created</SortHeader>
               </TableHead>
-              <TableHead className="w-[36px]"></TableHead>
+              <TableHead className="w-[72px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -267,29 +267,56 @@ export function TaskTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-muted-foreground hover:text-red-600"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (!confirm(`Delete "${task.title || task.description.slice(0, 40)}"?`)) return;
-                      try {
-                        const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
-                        if (res.ok) {
-                          toast.success("Task deleted");
-                          setSelected((prev) => { const next = new Set(prev); next.delete(task.id); return next; });
-                          onDelete?.(task.id);
-                        } else {
+                  <div className="flex items-center gap-0.5">
+                    {task.status !== "COMPLETED" && task.status !== "CANCELLED" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-blue-600"
+                        title="Send Slack reminder"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            const res = await fetch(`/api/tasks/${task.id}/remind`, { method: "POST" });
+                            const data = await res.json();
+                            if (res.ok) {
+                              toast.success(`Reminder sent to ${data.to}`);
+                            } else {
+                              toast.error(data.error || "Failed to send reminder");
+                            }
+                          } catch {
+                            toast.error("Failed to send reminder");
+                          }
+                        }}
+                      >
+                        <Bell className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-red-600"
+                      title="Delete task"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Delete "${task.title || task.description.slice(0, 40)}"?`)) return;
+                        try {
+                          const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
+                          if (res.ok) {
+                            toast.success("Task deleted");
+                            setSelected((prev) => { const next = new Set(prev); next.delete(task.id); return next; });
+                            onDelete?.(task.id);
+                          } else {
+                            toast.error("Failed to delete task");
+                          }
+                        } catch {
                           toast.error("Failed to delete task");
                         }
-                      } catch {
-                        toast.error("Failed to delete task");
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
