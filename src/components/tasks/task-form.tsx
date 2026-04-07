@@ -1292,12 +1292,9 @@ function ChannelSearchInput({
   value: string;
   onChange: (v: string) => void;
 }) {
-  const [query, setQuery] = useState(value);
+  const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
-
-  // Sync external value changes (e.g. from applyParsedItem)
-  useEffect(() => { setQuery(value); }, [value]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -1308,7 +1305,7 @@ function ChannelSearchInput({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const normalized = query.replace(/^#/, "").toLowerCase().trim();
+  const normalized = search.replace(/^#/, "").toLowerCase().trim();
   const filtered = normalized
     ? channels.filter((ch) => ch.name.toLowerCase().includes(normalized))
     : channels;
@@ -1317,13 +1314,16 @@ function ChannelSearchInput({
     <div ref={ref} className="relative">
       <Input
         placeholder="#channel-name"
-        value={query}
+        value={open ? search : value || search}
         onChange={(e) => {
-          setQuery(e.target.value);
+          setSearch(e.target.value);
           onChange(e.target.value);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          setSearch("");
+          setOpen(true);
+        }}
       />
       {open && filtered.length > 0 && (
         <div className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
@@ -1337,7 +1337,7 @@ function ChannelSearchInput({
               onMouseDown={(e) => {
                 e.preventDefault();
                 const val = `#${ch.name}`;
-                setQuery(val);
+                setSearch("");
                 onChange(val);
                 setOpen(false);
               }}
