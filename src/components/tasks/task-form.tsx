@@ -111,6 +111,8 @@ export function TaskForm() {
   const [submitting, setSubmitting] = useState(false);
   // Suggested owners from the selected action item (sender + @mentioned active users)
   const [suggestedOwners, setSuggestedOwners] = useState<{ slackId: string; name: string; role: string }[]>([]);
+  // Track the raw (un-humanized) description of the currently selected action item
+  const [rawSelectedDescription, setRawSelectedDescription] = useState<string>("");
 
   const [form, setForm] = useState({
     title: "",
@@ -324,6 +326,9 @@ export function TaskForm() {
     // Humanize the text (replace <@UXXXX> with @name)
     const rawDesc = (item.description as string) || "";
     const desc = humanizeSlackText(rawDesc);
+
+    // Save the raw description for dismiss/used tracking (before humanization)
+    setRawSelectedDescription(rawDesc);
 
     setForm((f) => {
       const updates: Partial<typeof f> = {};
@@ -567,12 +572,21 @@ export function TaskForm() {
       const task = await res.json();
 
       // Mark the current description as "used" so it won't show up again
-      if (form.description) {
-        markItemAsUsed(form.description, task.id, form.slackChannel || undefined);
+      // Use the raw (un-humanized) description so the hash matches future detections
+      const descToMark = rawSelectedDescription || form.description;
+      if (descToMark) {
+        markItemAsUsed(descToMark, task.id, form.slackChannel || undefined);
+        // Also mark the humanized version in case of direct text input
+        if (rawSelectedDescription && form.description !== rawSelectedDescription) {
+          markItemAsUsed(form.description, task.id, form.slackChannel || undefined);
+        }
       }
 
       // Also remove the used item from the parsed items list
-      setParsedItems((prev) => prev.filter((item) => item.description !== form.description));
+      const rawDesc = rawSelectedDescription || form.description;
+      setParsedItems((prev) => prev.filter((item) =>
+        item.description !== rawDesc && item.description !== form.description
+      ));
 
       if (createAnother) {
         // Reset form but keep channel selection and source type
@@ -589,8 +603,11 @@ export function TaskForm() {
           notes: "",
         });
         setSuggestedOwners([]);
+        setRawSelectedDescription("");
         // If there are remaining parsed items, auto-fill the next one
-        const remaining = parsedItems.filter((item) => item.description !== form.description);
+        const remaining = parsedItems.filter((item) =>
+          item.description !== rawDesc && item.description !== form.description
+        );
         if (remaining.length > 0) {
           setTimeout(() => applyParsedItem(remaining[0]), 100);
         }
