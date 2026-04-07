@@ -11,7 +11,7 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
 };
 
 export const STATUS_COLORS: Record<TaskStatus, string> = {
-  ACTIVE: "bg-[#E0F5F5] text-[#3AACAC]",
+  ACTIVE: "bg-teal-50 text-teal-700",
   WAITING_ON_OTHERS: "bg-yellow-100 text-yellow-700",
   COMPLETED: "bg-green-100 text-green-700",
   CANCELLED: "bg-gray-100 text-gray-500 line-through",
