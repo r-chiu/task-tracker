@@ -155,3 +155,22 @@ model SlackMember {
   isActive     Boolean  @default(true)
   lastSyncedAt DateTime @default(now())
 }
+
+/// Tracks action items that have been used (created as tasks) or dismissed.
+/// Used to filter them out from future detection results.
+model DismissedActionItem {
+  id          String   @id @default(cuid())
+  /// A hash of the description text — used for fast dedup lookups
+  contentHash String
+  /// The original text of the action item (for display/debugging)
+  description String
+  /// "used" = created as a task, "dismissed" = manually removed by user
+  reason      String   @default("dismissed")
+  /// The task ID if this item was used to create a task
+  taskId      String?
+  /// The Slack channel the item came from (if any)
+  channel     String?
+  createdAt   DateTime @default(now())
+
+  @@index([contentHash])
+}

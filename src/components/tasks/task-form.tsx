@@ -16,8 +16,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/constants";
 import { generateTitle } from "@/lib/slack-parser";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
+import { hashContent } from "@/lib/action-item-hash";
 
 interface SlackMember {
   id: string;
@@ -116,6 +117,8 @@ export function TaskForm() {
   // Parse from source text
   const [sourceText, setSourceText] = useState("");
   const [parsedItems, setParsedItems] = useState<any[]>([]);
+  // Track dismissed/used action item hashes (content hash → reason)
+  const [dismissedHashes, setDismissedHashes] = useState<Record<string, string>>({});
 
   // Resolve a Slack user ID or @handle to a display name (searches all members including bots/deactivated)
   const resolveSlackName = (idOrHandle: string | null): string | null => {
@@ -352,6 +355,66 @@ export function TaskForm() {
     }
   };
 
+  // Filter out already-dismissed/used items from a list
+  const filterDismissedItems = async (items: any[]): Promise<any[]> => {
+    if (items.length === 0) return items;
+    // Hash all descriptions
+    const hashPairs = await Promise.all(
+      items.map(async (item) => ({
+        item,
+        hash: await hashContent(item.description || ""),
+      }))
+    );
+    // Check which are dismissed
+    const hashes = hashPairs.map((p) => p.hash).join(",");
+    try {
+      const res = await fetch(`/api/action-items?hashes=${hashes}`);
+      const data = await res.json();
+      const dismissed: Record<string, string> = data.dismissed || {};
+      setDismissedHashes((prev) => ({ ...prev, ...dismissed }));
+      return hashPairs
+        .filter((p) => !dismissed[p.hash])
+        .map((p) => p.item);
+    } catch {
+      return items; // On error, show all
+    }
+  };
+
+  // Dismiss an action item (remove from list, mark in DB)
+  const handleDismissItem = async (item: any, index: number) => {
+    const description = item.description || "";
+    const hash = await hashContent(description);
+
+    // Immediately remove from UI
+    setParsedItems((prev) => prev.filter((_, i) => i !== index));
+    setDismissedHashes((prev) => ({ ...prev, [hash]: "dismissed" }));
+
+    // Persist to DB
+    fetch("/api/action-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ description, reason: "dismissed", channel: item.channel || null }],
+      }),
+    }).catch(() => {});
+
+    toast.info("Item dismissed — it won't show up again.");
+  };
+
+  // Mark an item as "used" when a task is created from it
+  const markItemAsUsed = async (description: string, taskId: string, channel?: string) => {
+    const hash = await hashContent(description);
+    setDismissedHashes((prev) => ({ ...prev, [hash]: "used" }));
+
+    fetch("/api/action-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ description, reason: "used", taskId, channel }],
+      }),
+    }).catch(() => {});
+  };
+
   const handleParseSource = async () => {
     if (!sourceText.trim()) return;
     const res = await fetch("/api/slack/parse", {
@@ -360,7 +423,8 @@ export function TaskForm() {
       body: JSON.stringify({ text: sourceText }),
     });
     const data = await res.json();
-    const items = data.items || [];
+    const rawItems = data.items || [];
+    const items = await filterDismissedItems(rawItems);
     setParsedItems(items);
     if (items.length > 0) {
       applyParsedItem(items[0]);
@@ -423,10 +487,12 @@ export function TaskForm() {
         }
         return true;
       });
-      setParsedItems(filtered);
-      if (filtered.length > 0) {
-        applyParsedItem(filtered[0]);
-        toast.success(`Scanned ${totalScanned} messages across ${selectedChannels.length} channel(s), found ${filtered.length} actionable message(s). Task details auto-filled.`);
+      // Filter out previously used/dismissed items
+      const finalItems = await filterDismissedItems(filtered);
+      setParsedItems(finalItems);
+      if (finalItems.length > 0) {
+        applyParsedItem(finalItems[0]);
+        toast.success(`Scanned ${totalScanned} messages across ${selectedChannels.length} channel(s), found ${finalItems.length} actionable message(s). Task details auto-filled.`);
       } else {
         toast.info(`Scanned ${totalScanned} messages across ${selectedChannels.length} channel(s). No actionable messages detected.`);
       }
@@ -437,7 +503,7 @@ export function TaskForm() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, createAnother = false) => {
     e.preventDefault();
     if (!form.title || !form.ownerId || !form.deadline) {
       toast.error("Task name, owner, and deadline are required.");
@@ -462,8 +528,40 @@ export function TaskForm() {
         toast.error(err.error || "Failed to create task");
         return;
       }
-      toast.success("Task created successfully");
-      router.push("/");
+      const task = await res.json();
+
+      // Mark the current description as "used" so it won't show up again
+      if (form.description) {
+        markItemAsUsed(form.description, task.id, form.slackChannel || undefined);
+      }
+
+      // Also remove the used item from the parsed items list
+      setParsedItems((prev) => prev.filter((item) => item.description !== form.description));
+
+      if (createAnother) {
+        // Reset form but keep channel selection and source type
+        toast.success("Task created! Fill in the next one.");
+        setForm({
+          title: "",
+          description: "",
+          ownerId: "",
+          deadline: "",
+          priority: "MEDIUM",
+          sourceType: form.sourceType,
+          sourceReference: "",
+          slackChannel: "",
+          notes: "",
+        });
+        setSuggestedOwners([]);
+        // If there are remaining parsed items, auto-fill the next one
+        const remaining = parsedItems.filter((item) => item.description !== form.description);
+        if (remaining.length > 0) {
+          setTimeout(() => applyParsedItem(remaining[0]), 100);
+        }
+      } else {
+        toast.success("Task created successfully");
+        router.push("/");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -583,13 +681,27 @@ export function TaskForm() {
                         const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
                         const ownerMember = item.suggestedOwner ? pool.find((m: SlackMember) => m.slackId === item.suggestedOwner) : null;
                         const showOwner = ownerName && (!ownerMember || (ownerMember.isActive !== false && !ownerMember.isBot));
+                        // Find the real index in parsedItems for dismiss
+                        const realIndex = parsedItems.indexOf(item);
                         return (
                           <div
                             key={i}
-                            className="text-sm p-3 rounded-md border cursor-pointer hover:bg-muted/50 hover:border-primary/30 transition-colors"
+                            className="group relative text-sm p-3 rounded-md border cursor-pointer hover:bg-muted/50 hover:border-primary/30 transition-colors"
                             onClick={() => applyParsedItem(item)}
                           >
-                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                            {/* Dismiss button */}
+                            <button
+                              type="button"
+                              className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-red-100 text-muted-foreground hover:text-red-600"
+                              title="Dismiss — won't show again"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDismissItem(item, realIndex >= 0 ? realIndex : i);
+                              }}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                            <div className="flex items-center gap-2 mb-1.5 flex-wrap pr-6">
                               <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
                                 item.confidence === "high" ? "bg-red-100 text-red-700" :
                                 item.confidence === "medium" ? "bg-orange-100 text-orange-700" :
@@ -833,6 +945,14 @@ export function TaskForm() {
       <div className="flex gap-3">
         <Button type="submit" disabled={submitting}>
           {submitting ? "Creating..." : "Create Task"}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={submitting}
+          onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}
+        >
+          Save & Create Another
         </Button>
         <Button type="button" variant="outline" onClick={() => router.push("/")}>
           Cancel
