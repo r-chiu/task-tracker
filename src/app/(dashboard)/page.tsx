@@ -5,6 +5,10 @@ import { TaskSummaryCards } from "@/components/tasks/task-summary-cards";
 import { TaskFilters } from "@/components/tasks/task-filters";
 import { TaskTable } from "@/components/tasks/task-table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { TaskStatus } from "@/lib/constants";
+import { toast } from "sonner";
+import { Bell } from "lucide-react";
 
 interface Filters {
   search: string;
@@ -22,6 +26,7 @@ export default function DashboardPage() {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [sortBy, setSortBy] = useState("deadline");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [sendingReminders, setSendingReminders] = useState(false);
   const [summary, setSummary] = useState({
     totalActive: 0,
     overdue: 0,
@@ -37,39 +42,12 @@ export default function DashboardPage() {
     if (filters.priority && filters.priority !== "all") params.set("priority", filters.priority);
     params.set("sortBy", sortBy);
     params.set("sortOrder", sortOrder);
+    params.set("includeSummary", "true");
 
     const res = await fetch(`/api/tasks?${params}`);
     const data = await res.json();
     setTasks(data.tasks || []);
-
-    // Calculate summary from all tasks (unfiltered)
-    const allRes = await fetch("/api/tasks?limit=1000");
-    const allData = await allRes.json();
-    const allTasks = allData.tasks || [];
-    const now = new Date();
-    const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    setSummary({
-      totalActive: allTasks.filter((t: any) =>
-        ["NOT_STARTED", "IN_PROGRESS", "WAITING_ON_OTHERS"].includes(t.status)
-      ).length,
-      overdue: allTasks.filter((t: any) => t.isOverdue).length,
-      dueSoon: allTasks.filter(
-        (t: any) =>
-          !t.isOverdue &&
-          ["NOT_STARTED", "IN_PROGRESS", "WAITING_ON_OTHERS"].includes(t.status) &&
-          new Date(t.deadline) <= threeDaysFromNow &&
-          new Date(t.deadline) >= now
-      ).length,
-      completedThisWeek: allTasks.filter(
-        (t: any) =>
-          t.status === "COMPLETED" &&
-          t.completionDate &&
-          new Date(t.completionDate) >= oneWeekAgo
-      ).length,
-    });
-
+    if (data.summary) setSummary(data.summary);
     setLoading(false);
   }, [filters, sortBy, sortOrder]);
 
@@ -106,8 +84,38 @@ export default function DashboardPage() {
     );
   }
 
+  const handleSendReminders = async () => {
+    setSendingReminders(true);
+    try {
+      const res = await fetch("/api/cron/reminders", {
+        headers: { "x-cron-secret": "manual" },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Sent ${data.remindersSent} reminder(s) and ${data.followUpsSent} follow-up(s)`);
+      } else {
+        toast.error(data.error || "Failed to send reminders");
+      }
+    } catch {
+      toast.error("Failed to send reminders");
+    } finally {
+      setSendingReminders(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <Button
+          variant="outline"
+          onClick={handleSendReminders}
+          disabled={sendingReminders}
+        >
+          <Bell className="mr-2 h-4 w-4" />
+          {sendingReminders ? "Sending..." : "Send Reminders"}
+        </Button>
+      </div>
       <TaskSummaryCards data={summary} />
       <TaskFilters
         filters={filters}
@@ -121,6 +129,23 @@ export default function DashboardPage() {
         sortOrder={sortOrder}
         onSort={handleSort}
         onDelete={() => fetchTasks()}
+        onStatusChange={async (taskId: string, newStatus: TaskStatus) => {
+          try {
+            const res = await fetch(`/api/tasks/${taskId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: newStatus }),
+            });
+            if (res.ok) {
+              toast.success("Status updated");
+              fetchTasks();
+            } else {
+              toast.error("Failed to update status");
+            }
+          } catch {
+            toast.error("Failed to update status");
+          }
+        }}
       />
     </div>
   );

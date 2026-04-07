@@ -185,9 +185,9 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Settings</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={provisionAllSlackMembers} disabled={provisioning}>
             <UserPlus className={`mr-2 h-4 w-4`} />
             {provisioning ? "Adding..." : "Add All Slack Members"}
