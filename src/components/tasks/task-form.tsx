@@ -394,11 +394,31 @@ export function TaskForm() {
     // Save the raw description for dismiss/used tracking (before humanization)
     setRawSelectedDescription(rawDesc);
 
+    // Get immediate title (AI from item or regex fallback)
+    const immediateTitle = getItemTitle(item, itemIndex);
+
+    // If no AI title on the item, request one from the API asynchronously
+    const hasAiTitle = !!(item.title as string);
+    if (!hasAiTitle && desc.length > 10) {
+      fetch("/api/tasks/generate-title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: desc }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.title && data.source === "ai") {
+            setForm((f) => ({ ...f, title: data.title }));
+          }
+        })
+        .catch(() => {});
+    }
+
     setForm((f) => {
       const updates: Partial<typeof f> = {};
 
       // Title — use custom title if edited, then AI title, then regex
-      updates.title = getItemTitle(item, itemIndex);
+      updates.title = immediateTitle;
       updates.description = desc;
 
       // Deadline
