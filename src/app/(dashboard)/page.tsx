@@ -142,7 +142,7 @@ export default function DashboardPage() {
       />
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Active Tasks</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">Active Tasks ({activeTasks.length})</h2>
           <Button
             variant="outline"
             size="sm"
