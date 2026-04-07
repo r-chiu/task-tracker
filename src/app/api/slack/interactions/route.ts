@@ -301,6 +301,16 @@ export async function POST(req: Request) {
           ).catch((e) => console.error("Failed to send approval DM:", e));
         }
 
+        // Record extension request in history
+        await recordTaskChange(
+          taskId,
+          requester.userId,
+          "extension_requested",
+          task.deadline.toISOString(),
+          newDeadlineStr,
+          `Extension requested: ${reason}`
+        );
+
         // Confirm to requester
         sendSlackDM(
           requesterSlackId,

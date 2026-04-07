@@ -43,7 +43,15 @@ export async function GET(req: Request) {
     } else if (log.field === "ownerId") {
       description = `Reassigned task`;
     } else if (log.field === "deadline") {
-      description = `Changed deadline from ${log.oldValue} to ${log.newValue}`;
+      if (log.note?.startsWith("Extension approved")) {
+        description = `Extension approved: deadline changed from ${log.oldValue} to ${log.newValue}`;
+      } else {
+        description = `Changed deadline from ${log.oldValue} to ${log.newValue}`;
+      }
+    } else if (log.field === "extension_requested") {
+      description = `Requested deadline extension from ${log.oldValue} to ${log.newValue}`;
+    } else if (log.field === "extension_denied") {
+      description = `Extension request denied (requested: ${log.newValue})`;
     } else {
       description = `Updated ${log.field}`;
       if (log.oldValue && log.newValue) {
