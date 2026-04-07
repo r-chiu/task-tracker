@@ -25,7 +25,7 @@ export function TaskStatusBadge({
           : STATUS_LABELS[status] || status}
       </Badge>
       {isOverdue && status === "WAITING_ON_OTHERS" && (
-        <Badge variant="outline" className="border-yellow-400 text-yellow-700 text-xs">
+        <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 text-xs">
           Waiting
         </Badge>
       )}
