@@ -15,7 +15,7 @@ import { TaskPriorityBadge } from "./task-priority-badge";
 import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { TAIPEI_TIMEZONE, STATUS_LABELS, TaskStatus } from "@/lib/constants";
-import { ArrowUpDown, Clock, Trash2 } from "lucide-react";
+import { ArrowUpDown, AlarmClock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -289,7 +289,7 @@ export function TaskTable({
                           }
                         }}
                       >
-                        <Clock className="h-4 w-4" />
+                        <AlarmClock className="h-4 w-4" />
                       </Button>
                     )}
                     <Button

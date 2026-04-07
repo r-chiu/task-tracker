@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { TaskStatus } from "@/lib/constants";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Clock } from "lucide-react";
+import { AlarmClock, ChevronDown, ChevronRight } from "lucide-react";
 
 interface Filters {
   search: string;
@@ -147,7 +147,7 @@ export default function DashboardPage() {
           onClick={handleSendReminders}
           disabled={sendingReminders}
         >
-          <Clock className="mr-2 h-4 w-4" />
+          <AlarmClock className="mr-2 h-4 w-4" />
           {sendingReminders ? "Sending..." : "Send All Reminders"}
         </Button>
       </div>
