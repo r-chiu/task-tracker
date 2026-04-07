@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { TaskSummaryCards } from "@/components/tasks/task-summary-cards";
 import { TaskFilters } from "@/components/tasks/task-filters";
 import { TaskTable } from "@/components/tasks/task-table";
@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { TaskStatus } from "@/lib/constants";
 import { toast } from "sonner";
-import { Clock } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock } from "lucide-react";
 
 interface Filters {
   search: string;
@@ -27,6 +27,7 @@ export default function DashboardPage() {
   const [sortBy, setSortBy] = useState("deadline");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [sendingReminders, setSendingReminders] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [summary, setSummary] = useState({
     totalActive: 0,
     overdue: 0,
@@ -84,6 +85,33 @@ export default function DashboardPage() {
     );
   }
 
+  const activeTasks = useMemo(
+    () => tasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED"),
+    [tasks]
+  );
+  const completedTasks = useMemo(
+    () => tasks.filter((t) => t.status === "COMPLETED" || t.status === "CANCELLED"),
+    [tasks]
+  );
+
+  const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        toast.success("Status updated");
+        fetchTasks();
+      } else {
+        toast.error("Failed to update status");
+      }
+    } catch {
+      toast.error("Failed to update status");
+    }
+  };
+
   const handleSendReminders = async () => {
     setSendingReminders(true);
     try {
@@ -124,29 +152,40 @@ export default function DashboardPage() {
         </Button>
       </div>
       <TaskTable
-        tasks={tasks}
+        tasks={activeTasks}
         sortBy={sortBy}
         sortOrder={sortOrder}
         onSort={handleSort}
         onDelete={() => fetchTasks()}
-        onStatusChange={async (taskId: string, newStatus: TaskStatus) => {
-          try {
-            const res = await fetch(`/api/tasks/${taskId}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ status: newStatus }),
-            });
-            if (res.ok) {
-              toast.success("Status updated");
-              fetchTasks();
-            } else {
-              toast.error("Failed to update status");
-            }
-          } catch {
-            toast.error("Failed to update status");
-          }
-        }}
+        onStatusChange={handleStatusChange}
       />
+
+      {/* Completed / Cancelled tasks */}
+      {completedTasks.length > 0 && (
+        <div className="space-y-2">
+          <button
+            onClick={() => setShowCompleted((v) => !v)}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showCompleted ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+            Completed / Cancelled ({completedTasks.length})
+          </button>
+          {showCompleted && (
+            <TaskTable
+              tasks={completedTasks}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={handleSort}
+              onDelete={() => fetchTasks()}
+              onStatusChange={handleStatusChange}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
