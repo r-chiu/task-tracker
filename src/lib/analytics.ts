@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { startOfYear } from "date-fns";
+import { isTaskOverdue } from "./task-utils";
 
 export interface PersonMetrics {
   userId: string;
@@ -9,8 +10,8 @@ export interface PersonMetrics {
   completedOnTime: number;
   completedLate: number;
   currentlyOverdue: number;
-  extendedBeforeDeadline: number;
-  extendedAfterDeadline: number;
+  totalExtensions: number;      // total number of extensions across all tasks
+  tasksWithExtensions: number;  // how many tasks needed at least one extension
   fulfillmentRate: number;
   onTimeRate: number;
 }
@@ -43,21 +44,19 @@ export async function getPersonMetrics(
     const owner = ownerTasks[0].owner;
     const totalAssigned = ownerTasks.length;
     const completed = ownerTasks.filter((t) => t.status === "COMPLETED").length;
-    const completedOnTime = ownerTasks.filter(
-      (t) =>
-        t.status === "COMPLETED" &&
-        t.completionDate &&
-        t.completionDate <= t.originalDeadline
-    ).length;
-    const completedLate = completed - completedOnTime;
-    const currentlyOverdue = ownerTasks.filter((t) => t.isOverdue).length;
 
-    const extendedBeforeDeadline = ownerTasks.filter((t) =>
-      t.extensions.some((e) => e.createdAt <= t.originalDeadline)
-    ).length;
-    const extendedAfterDeadline = ownerTasks.filter((t) =>
-      t.extensions.some((e) => e.createdAt > t.originalDeadline)
-    ).length;
+    // On Time = completed within effective deadline (revised if extended, otherwise original)
+    const completedOnTime = ownerTasks.filter((t) => {
+      if (t.status !== "COMPLETED" || !t.completionDate) return false;
+      const effectiveDeadline = t.revisedDeadline ?? t.originalDeadline;
+      return t.completionDate <= effectiveDeadline;
+    }).length;
+    const completedLate = completed - completedOnTime;
+    const currentlyOverdue = ownerTasks.filter((t) => isTaskOverdue(t)).length;
+
+    // Extension tracking
+    const totalExtensions = ownerTasks.reduce((sum, t) => sum + t.extensions.length, 0);
+    const tasksWithExtensions = ownerTasks.filter((t) => t.extensions.length > 0).length;
 
     const fulfillmentRate =
       totalAssigned > 0 ? (completed / totalAssigned) * 100 : 0;
@@ -72,8 +71,8 @@ export async function getPersonMetrics(
       completedOnTime,
       completedLate,
       currentlyOverdue,
-      extendedBeforeDeadline,
-      extendedAfterDeadline,
+      totalExtensions,
+      tasksWithExtensions,
       fulfillmentRate: Math.round(fulfillmentRate * 10) / 10,
       onTimeRate: Math.round(onTimeRate * 10) / 10,
     });
@@ -86,13 +85,16 @@ export async function getTeamMetrics(since?: Date) {
   const where: Record<string, unknown> = {};
   if (since) where.createdAt = { gte: since };
 
-  const [totalActive, overdueCount, completedCount] = await Promise.all([
-    prisma.task.count({
-      where: { ...where, status: { in: ["NOT_STARTED", "IN_PROGRESS", "WAITING_ON_OTHERS"] } },
+  const [activeTasks, completedCount] = await Promise.all([
+    prisma.task.findMany({
+      where: { ...where, status: { in: ["ACTIVE", "WAITING_ON_OTHERS"] } },
+      select: { status: true, deadline: true, revisedDeadline: true },
     }),
-    prisma.task.count({ where: { ...where, isOverdue: true } }),
     prisma.task.count({ where: { ...where, status: "COMPLETED" } }),
   ]);
+
+  const totalActive = activeTasks.length;
+  const overdueCount = activeTasks.filter((t) => isTaskOverdue(t)).length;
 
   return { totalActive, overdueCount, completedCount };
 }

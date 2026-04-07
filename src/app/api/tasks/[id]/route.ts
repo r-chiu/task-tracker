@@ -37,7 +37,7 @@ export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = getCurrentUser();
+  const user = await getCurrentUser();
   const { id } = await params;
   const existing = await prisma.task.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: "Task not found" }, { status: 404 });

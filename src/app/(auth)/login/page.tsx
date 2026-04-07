@@ -18,9 +18,9 @@ export default function LoginPage() {
           <Button
             className="w-full"
             size="lg"
-            onClick={() => signIn("google", { callbackUrl: "/" })}
+            onClick={() => signIn("slack", { callbackUrl: "/" })}
           >
-            Sign in with Google
+            Sign in with Slack
           </Button>
         </CardContent>
       </Card>

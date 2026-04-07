@@ -12,7 +12,7 @@ export async function generateWeeklyReport() {
   const [openTasks, overdueTasks, approachingTasks, recentlyCompleted, revisedTasks] =
     await Promise.all([
       prisma.task.findMany({
-        where: { status: { in: ["NOT_STARTED", "IN_PROGRESS", "WAITING_ON_OTHERS"] } },
+        where: { status: { in: ["ACTIVE", "WAITING_ON_OTHERS"] } },
         include: { owner: { select: { name: true, email: true } } },
         orderBy: { deadline: "asc" },
       }),
@@ -23,7 +23,7 @@ export async function generateWeeklyReport() {
       }),
       prisma.task.findMany({
         where: {
-          status: { in: ["NOT_STARTED", "IN_PROGRESS", "WAITING_ON_OTHERS"] },
+          status: { in: ["ACTIVE", "WAITING_ON_OTHERS"] },
           deadline: { gte: now, lte: threeDaysFromNow },
           isOverdue: false,
         },

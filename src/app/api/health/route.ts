@@ -7,6 +7,9 @@ export async function GET() {
       TURSO_AUTH_TOKEN: !!process.env.TURSO_AUTH_TOKEN,
       SLACK_BOT_TOKEN: !!process.env.SLACK_BOT_TOKEN,
       NEXTAUTH_SECRET: !!process.env.NEXTAUTH_SECRET,
+      SLACK_CLIENT_ID: !!process.env.SLACK_CLIENT_ID,
+      SLACK_CLIENT_SECRET: !!process.env.SLACK_CLIENT_SECRET,
+      NEXTAUTH_URL: process.env.NEXTAUTH_URL,
     },
   };
 

@@ -1,19 +1,17 @@
-export type TaskStatus = "NOT_STARTED" | "IN_PROGRESS" | "WAITING_ON_OTHERS" | "COMPLETED" | "CANCELLED";
+export type TaskStatus = "ACTIVE" | "WAITING_ON_OTHERS" | "COMPLETED" | "CANCELLED";
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type SourceType = "MANUAL" | "SLACK_MESSAGE" | "MEETING_NOTES" | "TRANSCRIPT" | "VIDEO_RECORDING" | "OTHER";
 export type Role = "ADMIN" | "MANAGER" | "VIEWER";
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
-  NOT_STARTED: "Active",
-  IN_PROGRESS: "In Progress",
+  ACTIVE: "Active",
   WAITING_ON_OTHERS: "Waiting on Others",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
 };
 
 export const STATUS_COLORS: Record<TaskStatus, string> = {
-  NOT_STARTED: "bg-teal-100 text-teal-700",
-  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  ACTIVE: "bg-[#E0F5F5] text-[#3AACAC]",
   WAITING_ON_OTHERS: "bg-yellow-100 text-yellow-700",
   COMPLETED: "bg-green-100 text-green-700",
   CANCELLED: "bg-gray-100 text-gray-500 line-through",
@@ -49,8 +47,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 export const ACTIVE_STATUSES: TaskStatus[] = [
-  "NOT_STARTED",
-  "IN_PROGRESS",
+  "ACTIVE",
   "WAITING_ON_OTHERS",
 ];
 

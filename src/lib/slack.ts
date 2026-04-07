@@ -263,22 +263,48 @@ export function buildReminderBlocks(task: {
   deadline: string;
   priority: string;
 }) {
+  const appUrl = process.env.NEXTAUTH_URL || "";
   const taskLabel = task.title || task.description.slice(0, 200);
   return [
     {
-      type: "header",
-      text: { type: "plain_text", text: "Task Deadline Reminder", emoji: true },
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `⏰ *Task Reminder*\n\n*${taskLabel}*\nThis task is due soon.`,
+      },
     },
     {
       type: "section",
       fields: [
-        { type: "mrkdwn", text: `*Task:*\n${taskLabel}` },
         { type: "mrkdwn", text: `*Owner:*\n${task.ownerName}` },
-        { type: "mrkdwn", text: `*Deadline:*\n${task.deadline}` },
         { type: "mrkdwn", text: `*Priority:*\n${task.priority}` },
+        { type: "mrkdwn", text: `*Deadline:*\n${task.deadline}` },
+        { type: "mrkdwn", text: `*Status:*\n🟡 Due Soon` },
       ],
     },
-    { type: "divider" },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "📋 View Task", emoji: true },
+          url: `${appUrl}/tasks/${task.id}`,
+          style: "primary" as const,
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "🔄 Request Extension", emoji: true },
+          action_id: "request_extension",
+          value: task.id,
+        },
+      ],
+    },
+    {
+      type: "context",
+      elements: [
+        { type: "mrkdwn", text: "Sent by Calyx Task Tracker" },
+      ],
+    },
   ];
 }
 
@@ -291,21 +317,47 @@ export function buildOverdueBlocks(task: {
   priority: string;
   daysOverdue: number;
 }) {
+  const appUrl = process.env.NEXTAUTH_URL || "";
   const taskLabel = task.title || task.description.slice(0, 200);
   return [
     {
-      type: "header",
-      text: { type: "plain_text", text: "Overdue Task Follow-Up", emoji: true },
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `🔴 *Overdue Task*\n\n*${taskLabel}*\nThis task is *${task.daysOverdue} day${task.daysOverdue > 1 ? "s" : ""} overdue*.`,
+      },
     },
     {
       type: "section",
       fields: [
-        { type: "mrkdwn", text: `*Task:*\n${taskLabel}` },
         { type: "mrkdwn", text: `*Owner:*\n${task.ownerName}` },
+        { type: "mrkdwn", text: `*Priority:*\n${task.priority}` },
         { type: "mrkdwn", text: `*Deadline:*\n${task.deadline}` },
-        { type: "mrkdwn", text: `*Days Overdue:*\n${task.daysOverdue}` },
+        { type: "mrkdwn", text: `*Status:*\n🔴 Overdue` },
       ],
     },
-    { type: "divider" },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "📋 View Task", emoji: true },
+          url: `${appUrl}/tasks/${task.id}`,
+          style: "primary" as const,
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "🔄 Request Extension", emoji: true },
+          action_id: "request_extension",
+          value: task.id,
+        },
+      ],
+    },
+    {
+      type: "context",
+      elements: [
+        { type: "mrkdwn", text: "Sent by Calyx Task Tracker" },
+      ],
+    },
   ];
 }

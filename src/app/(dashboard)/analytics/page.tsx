@@ -41,8 +41,8 @@ interface PersonMetric {
   completedOnTime: number;
   completedLate: number;
   currentlyOverdue: number;
-  extendedBeforeDeadline: number;
-  extendedAfterDeadline: number;
+  totalExtensions: number;
+  tasksWithExtensions: number;
   fulfillmentRate: number;
   onTimeRate: number;
 }
@@ -53,7 +53,11 @@ interface TeamMetrics {
   completedCount: number;
 }
 
-const COLORS = ["#22c55e", "#f97316", "#ef4444", "#6366f1", "#8b5cf6"];
+const PIE_COLORS: Record<string, string> = {
+  "On Time": "#61D6D6",
+  "Late": "#f97316",
+  "Overdue": "#ef4444",
+};
 
 export default function AnalyticsPage() {
   const currentYear = new Date().getFullYear();
@@ -183,7 +187,7 @@ export default function AnalyticsPage() {
                   <YAxis allowDecimals={false} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="On Time" fill="#22c55e" />
+                  <Bar dataKey="On Time" fill="#61D6D6" />
                   <Bar dataKey="Late" fill="#f97316" />
                   <Bar dataKey="Overdue" fill="#ef4444" />
                 </BarChart>
@@ -210,8 +214,8 @@ export default function AnalyticsPage() {
                     dataKey="value"
                     label={({ name, value }) => `${name}: ${value}`}
                   >
-                    {pieData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    {pieData.map((entry, i) => (
+                      <Cell key={i} fill={PIE_COLORS[entry.name] || "#6366f1"} />
                     ))}
                   </Pie>
                   <Tooltip />
@@ -241,15 +245,16 @@ export default function AnalyticsPage() {
                 <TableHead className="text-center">Completed</TableHead>
                 <TableHead className="text-center">On Time</TableHead>
                 <TableHead className="text-center">Late</TableHead>
-                <TableHead className="text-center">Overdue</TableHead>
-                <TableHead className="text-center">Fulfillment Rate</TableHead>
                 <TableHead className="text-center">On-Time Rate</TableHead>
+                <TableHead className="text-center">Extensions</TableHead>
+                <TableHead className="text-center" title="Active tasks past deadline">Overdue</TableHead>
+                <TableHead className="text-center">Fulfillment Rate</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {personMetrics.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                     No data yet
                   </TableCell>
                 </TableRow>
@@ -258,24 +263,33 @@ export default function AnalyticsPage() {
                 <TableRow key={m.userId}>
                   <TableCell className="font-medium">{m.userName}</TableCell>
                   <TableCell className="text-center">{m.totalAssigned}</TableCell>
-                  <TableCell className="text-center">{m.completed}</TableCell>
-                  <TableCell className="text-center text-green-600">{m.completedOnTime}</TableCell>
+                  <TableCell className="text-center text-green-600">{m.completed}</TableCell>
+                  <TableCell className="text-center text-[#61D6D6]">{m.completedOnTime}</TableCell>
                   <TableCell className="text-center text-orange-600">{m.completedLate}</TableCell>
+                  <TableCell className="text-center">
+                    <Badge
+                      variant="secondary"
+                      className={m.onTimeRate >= 80 ? "bg-[#E0F5F5] text-[#3AACAC]" : m.onTimeRate >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}
+                    >
+                      {m.onTimeRate}%
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center text-purple-600">
+                    {m.totalExtensions > 0 ? (
+                      <span title={`${m.tasksWithExtensions} task${m.tasksWithExtensions > 1 ? "s" : ""} extended`}>
+                        {m.totalExtensions}
+                      </span>
+                    ) : (
+                      "0"
+                    )}
+                  </TableCell>
                   <TableCell className="text-center text-red-600">{m.currentlyOverdue}</TableCell>
                   <TableCell className="text-center">
                     <Badge
                       variant="secondary"
-                      className={m.fulfillmentRate >= 80 ? "bg-green-100 text-green-700" : m.fulfillmentRate >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}
+                      className={m.fulfillmentRate >= 80 ? "bg-[#E0F5F5] text-[#3AACAC]" : m.fulfillmentRate >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}
                     >
                       {m.fulfillmentRate}%
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <Badge
-                      variant="secondary"
-                      className={m.onTimeRate >= 80 ? "bg-green-100 text-green-700" : m.onTimeRate >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}
-                    >
-                      {m.onTimeRate}%
                     </Badge>
                   </TableCell>
                 </TableRow>

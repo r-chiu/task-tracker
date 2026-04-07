@@ -7,7 +7,7 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = getCurrentUser();
+  const user = await getCurrentUser();
   const { id } = await params;
   const { revisedDeadline, reason } = await req.json();
 

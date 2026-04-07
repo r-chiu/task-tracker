@@ -19,12 +19,11 @@ import { ArrowUpDown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface TaskRow {
   id: string;
@@ -226,27 +225,26 @@ export function TaskTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  <Select
-                    value={task.status}
-                    onValueChange={(value) => onStatusChange?.(task.id, value as TaskStatus)}
-                  >
-                    <SelectTrigger className="h-auto min-w-[90px] w-fit gap-1 border-none bg-transparent px-1 py-0.5 shadow-none focus:ring-0 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:shrink-0">
-                      <div className="flex-1">
-                        <TaskStatusBadge
-                          status={task.status}
-                          isOverdue={task.isOverdue}
-                          hasRevision={!!task.revisedDeadline}
-                        />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="cursor-pointer focus:outline-none">
+                      <TaskStatusBadge
+                        status={task.status}
+                        isOverdue={task.isOverdue}
+                        hasRevision={!!task.revisedDeadline}
+                      />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
                       {(Object.keys(STATUS_LABELS) as TaskStatus[]).map((s) => (
-                        <SelectItem key={s} value={s}>
+                        <DropdownMenuItem
+                          key={s}
+                          onClick={() => onStatusChange?.(task.id, s)}
+                          className={task.status === s ? "font-semibold" : ""}
+                        >
                           {STATUS_LABELS[s]}
-                        </SelectItem>
+                        </DropdownMenuItem>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </TableCell>
                 <TableCell className="text-sm truncate">
                   {task.owner.name || task.owner.email}

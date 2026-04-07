@@ -43,9 +43,20 @@ export async function humanizeTask<T extends Record<string, unknown>>(task: T): 
   return result as T;
 }
 
-/** Humanize an array of tasks */
+/** Humanize an array of tasks and compute dynamic fields like isOverdue */
 export async function humanizeTasks<T extends Record<string, unknown>>(tasks: T[]): Promise<T[]> {
-  return Promise.all(tasks.map(humanizeTask));
+  return Promise.all(tasks.map(async (task) => {
+    const humanized = await humanizeTask(task);
+    // Compute isOverdue dynamically based on current time
+    if (humanized.status && humanized.deadline) {
+      (humanized as Record<string, unknown>).isOverdue = isTaskOverdue({
+        status: humanized.status as string,
+        deadline: new Date(humanized.deadline as string),
+        revisedDeadline: humanized.revisedDeadline ? new Date(humanized.revisedDeadline as string) : null,
+      });
+    }
+    return humanized;
+  }));
 }
 
 export function getEffectiveDeadline(task: { deadline: Date; revisedDeadline: Date | null }): Date {

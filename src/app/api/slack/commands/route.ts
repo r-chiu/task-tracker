@@ -131,7 +131,7 @@ export async function POST(req: Request) {
         deadline: deadlineDate,
         originalDeadline: deadlineDate,
         priority: parsed.priority,
-        status: "NOT_STARTED",
+        status: "ACTIVE",
         sourceType: "SLACK_MESSAGE",
         slackChannel: channelName ? `#${channelName}` : null,
       },

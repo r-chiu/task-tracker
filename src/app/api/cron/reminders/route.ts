@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   // 1. Pre-deadline reminders: tasks due in ~3 days
   const upcomingTasks = await prisma.task.findMany({
     where: {
-      status: { in: ["NOT_STARTED", "IN_PROGRESS", "WAITING_ON_OTHERS"] },
+      status: { in: ["ACTIVE", "WAITING_ON_OTHERS"] },
       deadline: { gte: now, lte: threeDaysFromNow },
       isOverdue: false,
     },
@@ -56,7 +56,7 @@ export async function GET(req: Request) {
   // 2. Overdue follow-ups
   const activeTasks = await prisma.task.findMany({
     where: {
-      status: { in: ["NOT_STARTED", "IN_PROGRESS", "WAITING_ON_OTHERS"] },
+      status: { in: ["ACTIVE", "WAITING_ON_OTHERS"] },
     },
     include: {
       owner: { select: { name: true, email: true, slackId: true } },
