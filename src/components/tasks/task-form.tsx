@@ -257,11 +257,22 @@ export function TaskForm() {
     });
   }, [defaultsApplied]);
 
-  // Load cached action items on mount
+  // Load cached action items on mount; auto-refresh if older than 2 hours
+  const autoRefreshTriggered = React.useRef(false);
   useEffect(() => {
     fetch("/api/action-items/cache")
       .then((r) => r.json())
       .then(async (data) => {
+        const CACHE_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+        const isStale = data.cachedAt && (Date.now() - new Date(data.cachedAt).getTime()) > CACHE_MAX_AGE_MS;
+
+        if (isStale && !autoRefreshTriggered.current) {
+          // Cache expired — will auto-refresh once channels and selectedChannels are ready
+          autoRefreshTriggered.current = true;
+          setCachedAt(data.cachedAt); // show stale timestamp briefly
+          return;
+        }
+
         if (data.items?.length > 0) {
           const items = await filterDismissedItems(data.items);
           if (items.length > 0) {
@@ -273,6 +284,16 @@ export function TaskForm() {
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-refresh: trigger detection once channels are ready and cache is stale
+  useEffect(() => {
+    if (autoRefreshTriggered.current && selectedChannels.length > 0 && !detecting && !loadingChannels) {
+      autoRefreshTriggered.current = false;
+      toast.info("Cache expired (>2h). Auto-refreshing action items...");
+      handleDetectFromSlack();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChannels, loadingChannels]);
 
   // Save items to cache
   const saveItemsToCache = (items: any[]) => {
