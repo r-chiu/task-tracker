@@ -14,16 +14,23 @@ import { TaskStatusBadge } from "./task-status-badge";
 import { TaskPriorityBadge } from "./task-priority-badge";
 import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
-import { TAIPEI_TIMEZONE } from "@/lib/constants";
+import { TAIPEI_TIMEZONE, STATUS_LABELS, TaskStatus } from "@/lib/constants";
 import { ArrowUpDown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface TaskRow {
   id: string;
   title?: string;
   description: string;
-  status: "NOT_STARTED" | "IN_PROGRESS" | "WAITING_ON_OTHERS" | "COMPLETED" | "CANCELLED";
+  status: "ACTIVE" | "WAITING_ON_OTHERS" | "COMPLETED" | "CANCELLED";
   priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
   deadline: string;
   isOverdue: boolean;
@@ -47,12 +54,14 @@ export function TaskTable({
   sortOrder,
   onSort,
   onDelete,
+  onStatusChange,
 }: {
   tasks: TaskRow[];
   sortBy: string;
   sortOrder: "asc" | "desc";
   onSort: (field: string) => void;
   onDelete?: (taskId: string) => void;
+  onStatusChange?: (taskId: string, newStatus: TaskStatus) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -164,12 +173,12 @@ export function TaskTable({
                   aria-label="Select all tasks"
                 />
               </TableHead>
-              <TableHead className="w-[33%]">
+              <TableHead className="w-[30%]">
                 <SortHeader field="title">Task Name</SortHeader>
               </TableHead>
-              <TableHead className="w-[9%]">Status</TableHead>
-              <TableHead className="w-[11%]">Owner</TableHead>
-              <TableHead className="w-[9%]">
+              <TableHead className="w-[14%]">Status</TableHead>
+              <TableHead className="w-[10%]">Owner</TableHead>
+              <TableHead className="w-[8%]">
                 <SortHeader field="priority">Priority</SortHeader>
               </TableHead>
               <TableHead className="w-[11%]">
@@ -192,7 +201,7 @@ export function TaskTable({
             {tasks.map((task) => (
               <TableRow
                 key={task.id}
-                className={`${task.isOverdue ? "bg-red-50/50" : ""} ${selected.has(task.id) ? "bg-primary/5" : ""}`}
+                className={`${task.isOverdue ? "bg-red-50/50" : ""} ${selected.has(task.id) ? "bg-[#61D6D6]/10" : ""}`}
               >
                 <TableCell>
                   <input
@@ -217,11 +226,27 @@ export function TaskTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  <TaskStatusBadge
-                    status={task.status}
-                    isOverdue={task.isOverdue}
-                    hasRevision={!!task.revisedDeadline}
-                  />
+                  <Select
+                    value={task.status}
+                    onValueChange={(value) => onStatusChange?.(task.id, value as TaskStatus)}
+                  >
+                    <SelectTrigger className="h-auto min-w-[90px] w-fit gap-1 border-none bg-transparent px-1 py-0.5 shadow-none focus:ring-0 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:shrink-0">
+                      <div className="flex-1">
+                        <TaskStatusBadge
+                          status={task.status}
+                          isOverdue={task.isOverdue}
+                          hasRevision={!!task.revisedDeadline}
+                        />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(STATUS_LABELS) as TaskStatus[]).map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {STATUS_LABELS[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell className="text-sm truncate">
                   {task.owner.name || task.owner.email}
