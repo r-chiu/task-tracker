@@ -1,0 +1,983 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/constants";
+import { generateTitle } from "@/lib/slack-parser";
+import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+
+interface SlackMember {
+  id: string;
+  slackId: string;
+  displayName: string | null;
+  realName: string | null;
+  email: string | null;
+  isBot?: boolean;
+  isActive?: boolean;
+}
+
+interface SlackChannel {
+  id: string;
+  name: string;
+  type?: "channel" | "group_dm";
+}
+
+const CHANNEL_CATEGORIES: Record<string, { label: string; color: string }> = {
+  "m-": { label: "Management", color: "bg-indigo-100 text-indigo-800" },
+  "b-": { label: "Business / Sales", color: "bg-amber-100 text-amber-800" },
+  "e-": { label: "Engineering", color: "bg-blue-100 text-blue-800" },
+  "ai-": { label: "AI", color: "bg-purple-100 text-purple-800" },
+  "d-": { label: "Project Development", color: "bg-cyan-100 text-cyan-800" },
+  "r-": { label: "R&D Sensor", color: "bg-green-100 text-green-800" },
+  "t-": { label: "Testing", color: "bg-orange-100 text-orange-800" },
+};
+
+function categorizeChannels(channels: SlackChannel[]) {
+  const categorized: Record<string, SlackChannel[]> = {};
+  const uncategorized: SlackChannel[] = [];
+  const groupDms: SlackChannel[] = [];
+
+  for (const ch of channels) {
+    if (ch.type === "group_dm") {
+      groupDms.push(ch);
+      continue;
+    }
+    let matched = false;
+    for (const prefix of Object.keys(CHANNEL_CATEGORIES)) {
+      if (ch.name.startsWith(prefix)) {
+        if (!categorized[prefix]) categorized[prefix] = [];
+        categorized[prefix].push(ch);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) uncategorized.push(ch);
+  }
+
+  return { categorized, uncategorized, groupDms };
+}
+
+interface User {
+  id: string;
+  name: string | null;
+  email: string;
+  slackId?: string | null;
+}
+
+export function TaskForm() {
+  const router = useRouter();
+  const [users, setUsers] = useState<User[]>([]);
+  const [slackMembers, setSlackMembers] = useState<SlackMember[]>([]);
+  const [allSlackMembers, setAllSlackMembers] = useState<SlackMember[]>([]);
+  const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
+  const [selectedChannels, _setSelectedChannels] = useState<string[]>([]);
+  const [defaultsApplied, setDefaultsApplied] = useState(false);
+
+  // Persist channel selection to localStorage
+  const STORAGE_KEY = "task-tracker:selected-channels";
+  const setSelectedChannels: typeof _setSelectedChannels = (value) => {
+    _setSelectedChannels((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const [detecting, setDetecting] = useState(false);
+  const [refreshingChannels, setRefreshingChannels] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // Suggested owners from the selected action item (sender + @mentioned active users)
+  const [suggestedOwners, setSuggestedOwners] = useState<{ slackId: string; name: string; role: string }[]>([]);
+
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    ownerId: "",
+    deadline: "",
+    priority: "MEDIUM",
+    sourceType: "MANUAL",
+    sourceReference: "",
+    slackChannel: "",
+    notes: "",
+  });
+
+  // Parse from source text
+  const [sourceText, setSourceText] = useState("");
+  const [parsedItems, setParsedItems] = useState<any[]>([]);
+
+  // Resolve a Slack user ID or @handle to a display name (searches all members including bots/deactivated)
+  const resolveSlackName = (idOrHandle: string | null): string | null => {
+    if (!idOrHandle) return null;
+    const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+    const member = pool.find(
+      (m) =>
+        m.slackId === idOrHandle ||
+        m.displayName?.toLowerCase() === idOrHandle.toLowerCase() ||
+        m.realName?.toLowerCase() === idOrHandle.toLowerCase()
+    );
+    return member?.displayName || member?.realName || null;
+  };
+
+  // Replace all <@UXXXX> Slack mention markup in text with @displayName
+  const humanizeSlackText = (text: string): string => {
+    const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+    return text.replace(/<@(\w+)>/g, (match, userId) => {
+      const member = pool.find((m) => m.slackId === userId);
+      if (!member) return match;
+      const name = member.displayName || member.realName;
+      if (!name) return match;
+      // Mark deactivated users so it's clear they're no longer active
+      if (member.isActive === false) return `@${name} (deactivated)`;
+      if (member.isBot) return `@${name} (bot)`;
+      return `@${name}`;
+    });
+  };
+
+  // Fallback defaults for first-time users (before any selection is saved)
+  const DEFAULT_ACTIVE_CHANNELS = [
+    "m-marketing",
+    "m-camera-committee",
+    "m-camera-monitoring",
+    "m-founding-team",
+    "b-customer-support-tyson",
+    "b-customer-support-simmonsfood",
+  ];
+
+  useEffect(() => {
+    fetch("/api/users").then((r) => r.json()).then((d) => setUsers(Array.isArray(d) ? d : []));
+    fetch("/api/slack/members").then((r) => r.json()).then((d) => setSlackMembers(Array.isArray(d) ? d : []));
+    // Fetch all members (including bots/deactivated) for name resolution
+    fetch("/api/slack/members?all=1").then((r) => r.json()).then((d) => setAllSlackMembers(Array.isArray(d) ? d : []));
+    fetch("/api/slack/channels").then((r) => r.json()).then((d) => {
+      const channels = Array.isArray(d) ? d : [];
+      setSlackChannels(channels);
+      if (!defaultsApplied && channels.length > 0) {
+        // Restore saved selection from localStorage, or fall back to defaults
+        let restored = false;
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) {
+            const ids = JSON.parse(saved) as string[];
+            // Validate that saved IDs still exist in current channel list
+            const validIds = channels.map((ch: SlackChannel) => ch.id);
+            const filtered = ids.filter((id) => validIds.includes(id));
+            if (filtered.length > 0) {
+              _setSelectedChannels(filtered);
+              restored = true;
+            }
+          }
+        } catch {}
+        if (!restored) {
+          const defaultIds = channels
+            .filter((ch: SlackChannel) => DEFAULT_ACTIVE_CHANNELS.includes(ch.name))
+            .map((ch: SlackChannel) => ch.id);
+          _setSelectedChannels(defaultIds);
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultIds)); } catch {}
+        }
+        setDefaultsApplied(true);
+      }
+    });
+  }, [defaultsApplied]);
+
+  const handleRefreshChannels = async () => {
+    setRefreshingChannels(true);
+    try {
+      // Sync members from Slack first, then refresh channels
+      await fetch("/api/slack/members", { method: "POST" });
+      const [membersRes, allMembersRes, channelsRes] = await Promise.all([
+        fetch("/api/slack/members"),
+        fetch("/api/slack/members?all=1"),
+        fetch("/api/slack/channels?refresh=1"),
+      ]);
+      const members = await membersRes.json();
+      const allMembers = await allMembersRes.json();
+      const channels = await channelsRes.json();
+      setSlackMembers(Array.isArray(members) ? members : []);
+      setAllSlackMembers(Array.isArray(allMembers) ? allMembers : []);
+      setSlackChannels(Array.isArray(channels) ? channels : []);
+      toast.success(`Refreshed ${channels.length} channels and ${members.length} members from Slack.`);
+    } catch {
+      toast.error("Failed to refresh from Slack.");
+    } finally {
+      setRefreshingChannels(false);
+    }
+  };
+
+  // Match a Slack user ID to a system User (for owner assignment)
+  const matchSlackIdToUser = (slackId: string): string | null => {
+    // Direct match by slackId on the User model
+    const bySlackId = users.find((u) => u.slackId === slackId);
+    if (bySlackId) return bySlackId.id;
+
+    const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+    const member = pool.find((m) => m.slackId === slackId);
+    if (!member) return null;
+    // Try to find a matching system user by email, name, or display name
+    if (member.email) {
+      const byEmail = users.find((u) => u.email === member.email);
+      if (byEmail) return byEmail.id;
+    }
+    const name = (member.displayName || member.realName || "").toLowerCase();
+    if (name) {
+      const byName = users.find(
+        (u) => u.name?.toLowerCase() === name || u.email.split("@")[0].toLowerCase() === name
+      );
+      if (byName) return byName.id;
+    }
+    return null;
+  };
+
+  // Auto-create a system user from a Slack member and return their user ID
+  // Also updates local users state and optionally sets form ownerId
+  const ensureUserForSlackId = async (slackId: string, autoSetOwner = false): Promise<string | null> => {
+    // Already exists?
+    const existing = matchSlackIdToUser(slackId);
+    if (existing) {
+      if (autoSetOwner) setForm((f) => ({ ...f, ownerId: existing }));
+      return existing;
+    }
+
+    // Find Slack member info
+    const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+    const member = pool.find((m) => m.slackId === slackId);
+    if (!member) return null;
+
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slackId: member.slackId,
+          name: member.realName || member.displayName,
+          email: member.email,
+          slackDisplayName: member.displayName,
+        }),
+      });
+      if (!res.ok) return null;
+      const newUser = await res.json();
+      const userEntry: User = { id: newUser.id, name: newUser.name, email: newUser.email, slackId: newUser.slackId };
+      // Add to local users state AND set ownerId in a single batch to avoid stale render
+      setUsers((prev) => {
+        // Avoid duplicates
+        if (prev.some((u) => u.id === newUser.id)) return prev;
+        return [...prev, userEntry];
+      });
+      if (autoSetOwner) setForm((f) => ({ ...f, ownerId: newUser.id }));
+      return newUser.id;
+    } catch {
+      return null;
+    }
+  };
+
+  // Auto-fill form from a parsed action item
+  const applyParsedItem = (item: Record<string, unknown>) => {
+    const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+
+    // Humanize the text (replace <@UXXXX> with @name)
+    const rawDesc = (item.description as string) || "";
+    const desc = humanizeSlackText(rawDesc);
+
+    setForm((f) => {
+      const updates: Partial<typeof f> = {};
+
+      // Title — smart concise subject; Description — full humanized text
+      updates.title = generateTitle(desc);
+      updates.description = desc;
+
+      // Deadline
+      if (item.suggestedDeadline) {
+        const dl = item.suggestedDeadline as string;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dl)) updates.deadline = dl;
+      }
+
+      // Priority
+      if (item.suggestedPriority) updates.priority = item.suggestedPriority as string;
+
+      // Channel
+      if (item.channel) {
+        updates.slackChannel = item.channel as string;
+        updates.sourceType = "SLACK_MESSAGE";
+      }
+
+      return { ...f, ...updates };
+    });
+
+    // Build suggested owners: sender + all @mentioned active users
+    const candidates: { slackId: string; name: string; role: string }[] = [];
+    const seen = new Set<string>();
+
+    // Add sender
+    if (item.sender) {
+      const senderId = item.sender as string;
+      const senderMember = pool.find((m) => m.slackId === senderId);
+      if (senderMember && senderMember.isActive !== false && !senderMember.isBot) {
+        const name = senderMember.displayName || senderMember.realName || senderId;
+        candidates.push({ slackId: senderId, name, role: "sender" });
+        seen.add(senderId);
+      }
+    }
+
+    // Add all @mentioned users
+    const mentionedIds = [...rawDesc.matchAll(/<@(\w+)>/g)].map((m) => m[1]);
+    for (const mid of mentionedIds) {
+      if (seen.has(mid)) continue;
+      const member = pool.find((m) => m.slackId === mid);
+      if (member && member.isActive !== false && !member.isBot) {
+        const name = member.displayName || member.realName || mid;
+        candidates.push({ slackId: mid, name, role: "mentioned" });
+        seen.add(mid);
+      }
+    }
+
+    setSuggestedOwners(candidates);
+
+    // Auto-select owner: pick first mentioned, or sender. Auto-create if needed.
+    const mentioned = candidates.filter((c) => c.role === "mentioned");
+    const autoOwner = mentioned.length > 0 ? mentioned[0] : candidates[0];
+    if (autoOwner) {
+      // ensureUserForSlackId handles both existing and new users, and sets ownerId
+      ensureUserForSlackId(autoOwner.slackId, true);
+    }
+  };
+
+  const handleParseSource = async () => {
+    if (!sourceText.trim()) return;
+    const res = await fetch("/api/slack/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: sourceText }),
+    });
+    const data = await res.json();
+    const items = data.items || [];
+    setParsedItems(items);
+    if (items.length > 0) {
+      applyParsedItem(items[0]);
+      toast.success(`Found ${items.length} actionable item(s). Task details auto-filled.`);
+    } else {
+      toast.info("No actionable items detected. You can enter the task manually.");
+    }
+  };
+
+  const toggleChannel = (channelId: string) => {
+    setSelectedChannels((prev) =>
+      prev.includes(channelId) ? prev.filter((id) => id !== channelId) : [...prev, channelId]
+    );
+  };
+
+  const handleDetectFromSlack = async () => {
+    if (selectedChannels.length === 0) {
+      toast.error("Please select at least one Slack channel.");
+      return;
+    }
+    setDetecting(true);
+    try {
+      let allItems: typeof parsedItems = [];
+      let totalScanned = 0;
+      for (const channelId of selectedChannels) {
+        const res = await fetch("/api/slack/detect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channelId, limit: 50 }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const channelName = slackChannels.find((c) => c.id === channelId)?.name;
+          const items = (data.items || []).map((item: Record<string, unknown>) => ({
+            ...item,
+            channel: channelName ? `#${channelName}` : channelId,
+          }));
+          allItems = [...allItems, ...items];
+          totalScanned += data.messagesScanned || 0;
+        }
+      }
+      // Filter out messages from bots/deactivated senders,
+      // and messages where all mentioned users are deactivated/bots
+      const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+      const isActiveUser = (userId: string) => {
+        const m = pool.find((x) => x.slackId === userId);
+        return !m || (m.isActive !== false && !m.isBot);
+      };
+      const filtered = allItems.filter((item: Record<string, unknown>) => {
+        // Filter by sender
+        if (item.sender) {
+          if (!isActiveUser(item.sender as string)) return false;
+        }
+        // Filter by mentioned users — if message has @mentions and ALL are deactivated/bots, skip it
+        const desc = (item.description as string) || "";
+        const mentionedIds = [...desc.matchAll(/<@(\w+)>/g)].map((m) => m[1]);
+        if (mentionedIds.length > 0) {
+          const hasActiveRecipient = mentionedIds.some((id) => isActiveUser(id));
+          if (!hasActiveRecipient) return false;
+        }
+        return true;
+      });
+      setParsedItems(filtered);
+      if (filtered.length > 0) {
+        applyParsedItem(filtered[0]);
+        toast.success(`Scanned ${totalScanned} messages across ${selectedChannels.length} channel(s), found ${filtered.length} actionable message(s). Task details auto-filled.`);
+      } else {
+        toast.info(`Scanned ${totalScanned} messages across ${selectedChannels.length} channel(s). No actionable messages detected.`);
+      }
+    } catch {
+      toast.error("Failed to connect to Slack.");
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.title || !form.ownerId || !form.deadline) {
+      toast.error("Task name, owner, and deadline are required.");
+      return;
+    }
+    // Safety: resolve any unresolved slack: prefix
+    let ownerId = form.ownerId;
+    if (ownerId.startsWith("slack:")) {
+      const resolved = await ensureUserForSlackId(ownerId.slice(6), true);
+      if (!resolved) { toast.error("Failed to create user for owner"); return; }
+      ownerId = resolved;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, ownerId }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        toast.error(err.error || "Failed to create task");
+        return;
+      }
+      toast.success("Task created successfully");
+      router.push("/");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+      {/* Detect from Slack */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Detect Action Items from Slack</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Slack Channels</Label>
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={handleRefreshChannels}
+                  disabled={refreshingChannels}
+                >
+                  <RefreshCw className={`h-3 w-3 mr-1 ${refreshingChannels ? "animate-spin" : ""}`} />
+                  {refreshingChannels ? "Refreshing..." : "Refresh"}
+                </Button>
+                {selectedChannels.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setSelectedChannels([])}
+                  >
+                    Clear all ({selectedChannels.length})
+                  </button>
+                )}
+              </div>
+            </div>
+            {slackChannels.length > 0 ? (
+              <ChannelSelector
+                channels={slackChannels}
+                selectedChannels={selectedChannels}
+                onToggle={toggleChannel}
+                onToggleCategory={(ids) => {
+                  setSelectedChannels((prev) => {
+                    const allSelected = ids.every((id) => prev.includes(id));
+                    if (allSelected) return prev.filter((id) => !ids.includes(id));
+                    return [...new Set([...prev, ...ids])];
+                  });
+                }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">No channels found. Check your Slack bot token.</p>
+            )}
+          </div>
+          <Button type="button" onClick={handleDetectFromSlack} disabled={detecting || selectedChannels.length === 0}>
+            {detecting ? "Scanning..." : `Detect from ${selectedChannels.length || ""} Channel${selectedChannels.length !== 1 ? "s" : ""}`}
+          </Button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">or paste text manually</span>
+            </div>
+          </div>
+
+          <Textarea
+            placeholder="Paste a Slack message, meeting notes, or any text to auto-detect action items..."
+            value={sourceText}
+            onChange={(e) => setSourceText(e.target.value)}
+            rows={3}
+          />
+          <Button type="button" variant="secondary" onClick={handleParseSource} disabled={!sourceText.trim()}>
+            Parse Pasted Text
+          </Button>
+
+          {parsedItems.length > 0 && (() => {
+            const confidenceOrder = { high: 0, medium: 1, low: 2 };
+            const sorted = [...parsedItems].sort(
+              (a, b) => (confidenceOrder[a.confidence as keyof typeof confidenceOrder] ?? 2) - (confidenceOrder[b.confidence as keyof typeof confidenceOrder] ?? 2)
+            );
+
+            // Group by ownerGroup if present (structured notes)
+            const hasGroups = sorted.some((item) => item.ownerGroup);
+            const groups: { label: string | null; items: typeof sorted }[] = [];
+            if (hasGroups) {
+              const seen = new Map<string | null, typeof sorted>();
+              for (const item of sorted) {
+                const key = item.ownerGroup || null;
+                if (!seen.has(key)) seen.set(key, []);
+                seen.get(key)!.push(item);
+              }
+              for (const [label, items] of seen) groups.push({ label, items });
+            } else {
+              groups.push({ label: null, items: sorted });
+            }
+
+            return (
+              <div className="rounded-md border p-3 space-y-2">
+                <p className="text-sm font-medium">Actionable Items ({sorted.length}):</p>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {groups.map((group, gi) => (
+                    <div key={gi}>
+                      {group.label && (
+                        <div className="flex items-center gap-2 mt-2 mb-1.5">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                            {group.label}
+                          </span>
+                          <span className="text-xs text-muted-foreground">({group.items.length})</span>
+                        </div>
+                      )}
+                      {group.items.map((item, i) => {
+                        const senderName = resolveSlackName(item.sender);
+                        // For structured text, suggestedOwner may be a person name (not a Slack ID)
+                        const ownerName = resolveSlackName(item.suggestedOwner) || item.suggestedOwner;
+                        const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+                        const ownerMember = item.suggestedOwner ? pool.find((m: SlackMember) => m.slackId === item.suggestedOwner) : null;
+                        const showOwner = ownerName && (!ownerMember || (ownerMember.isActive !== false && !ownerMember.isBot));
+                        return (
+                          <div
+                            key={i}
+                            className="text-sm p-3 rounded-md border cursor-pointer hover:bg-muted/50 hover:border-primary/30 transition-colors"
+                            onClick={() => applyParsedItem(item)}
+                          >
+                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                                item.confidence === "high" ? "bg-red-100 text-red-700" :
+                                item.confidence === "medium" ? "bg-orange-100 text-orange-700" :
+                                "bg-gray-100 text-gray-600"
+                              }`}>
+                                {item.confidence}
+                              </span>
+                              {item.channel && <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{item.channel}</span>}
+                              {senderName && <span className="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded">From: {senderName}</span>}
+                              {showOwner && <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{ownerName}</span>}
+                              {item.suggestedDeadline && <span className="text-xs bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">Due: {item.suggestedDeadline}</span>}
+                              {item.suggestedPriority && <span className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">{item.suggestedPriority}</span>}
+                            </div>
+                            <p className="text-sm whitespace-pre-wrap leading-relaxed">{humanizeSlackText(item.description)}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">Click an item to auto-fill the task details below.</p>
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
+
+      {/* Task details */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Task Details</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="title">Task Name *</Label>
+            <Input
+              id="title"
+              placeholder="Short task name, e.g. 'Prepare Q2 sales report'"
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Textarea
+              id="description"
+              placeholder="Describe the task in detail..."
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              rows={3}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="owner">Owner *</Label>
+              {suggestedOwners.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-muted-foreground">Suggested:</span>
+                  {suggestedOwners.map((s) => {
+                    const userId = matchSlackIdToUser(s.slackId);
+                    const isSelected = userId && form.ownerId === userId;
+                    return (
+                      <button
+                        key={s.slackId}
+                        type="button"
+                        className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                          isSelected
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : s.role === "sender"
+                            ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                            : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                        }`}
+                        onClick={async () => {
+                          if (userId) {
+                            setForm((f) => ({ ...f, ownerId: userId }));
+                          } else {
+                            const id = await ensureUserForSlackId(s.slackId, true);
+                            if (id) {
+                              toast.success(`Auto-created system user for ${s.name}`);
+                            } else {
+                              toast.error(`Could not create user for ${s.name}`);
+                            }
+                          }
+                        }}
+                      >
+                        {s.name} {s.role === "sender" ? "(sender)" : "(mentioned)"}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <Select
+                value={form.ownerId}
+                onValueChange={async (v) => {
+                  if (!v) return;
+                  if (v.startsWith("slack:")) {
+                    const slackId = v.slice(6);
+                    const id = await ensureUserForSlackId(slackId, true);
+                    if (id) {
+                      const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
+                      const member = pool.find((m) => m.slackId === slackId);
+                      toast.success(`Auto-created system user for ${member?.displayName || member?.realName || slackId}`);
+                    } else {
+                      toast.error("Failed to create user");
+                    }
+                  } else {
+                    setForm((f) => ({ ...f, ownerId: v }));
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select owner...">
+                    {/* Explicit label: @base-ui Select can't resolve item text when popup is closed */}
+                    {form.ownerId
+                      ? (users.find((u) => u.id === form.ownerId)?.name ||
+                         users.find((u) => u.id === form.ownerId)?.email ||
+                         undefined)
+                      : undefined}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {users.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name || u.email}
+                    </SelectItem>
+                  ))}
+                  {/* Slack members not yet system users */}
+                  {(() => {
+                    const userSlackIds = new Set(users.map((u) => u.slackId).filter(Boolean));
+                    const userEmails = new Set(users.map((u) => u.email.toLowerCase()));
+                    const unlinked = slackMembers.filter(
+                      (m) =>
+                        m.slackId &&
+                        !userSlackIds.has(m.slackId) &&
+                        (!m.email || !userEmails.has(m.email.toLowerCase()))
+                    );
+                    if (unlinked.length === 0) return null;
+                    return (
+                      <>
+                        <SelectItem value="__divider__" disabled>
+                          ── Slack Members (auto-create) ──
+                        </SelectItem>
+                        {unlinked.map((m) => (
+                          <SelectItem key={m.slackId} value={`slack:${m.slackId}`}>
+                            {m.displayName || m.realName || m.email || m.slackId}
+                          </SelectItem>
+                        ))}
+                      </>
+                    );
+                  })()}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deadline">Deadline *</Label>
+              <Input
+                id="deadline"
+                type="date"
+                value={form.deadline}
+                onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Priority</Label>
+              <Select
+                value={form.priority}
+                onValueChange={(v) => v && setForm((f) => ({ ...f, priority: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {PRIORITY_LABELS[form.priority as keyof typeof PRIORITY_LABELS] || undefined}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(PRIORITY_LABELS).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Source Type</Label>
+              <Select
+                value={form.sourceType}
+                onValueChange={(v) => v && setForm((f) => ({ ...f, sourceType: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {SOURCE_LABELS[form.sourceType as keyof typeof SOURCE_LABELS] || undefined}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(SOURCE_LABELS).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Source Reference</Label>
+              <Input
+                placeholder="URL or reference ID..."
+                value={form.sourceReference}
+                onChange={(e) => setForm((f) => ({ ...f, sourceReference: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Slack Channel</Label>
+              <Input
+                placeholder="#channel-name"
+                value={form.slackChannel}
+                onChange={(e) => setForm((f) => ({ ...f, slackChannel: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Notes</Label>
+            <Textarea
+              placeholder="Additional notes..."
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              rows={2}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex gap-3">
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "Creating..." : "Create Task"}
+        </Button>
+        <Button type="button" variant="outline" onClick={() => router.push("/")}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ChannelSelector({
+  channels,
+  selectedChannels,
+  onToggle,
+  onToggleCategory,
+}: {
+  channels: SlackChannel[];
+  selectedChannels: string[];
+  onToggle: (id: string) => void;
+  onToggleCategory: (ids: string[]) => void;
+}) {
+  const { categorized, uncategorized, groupDms } = categorizeChannels(channels);
+
+  // Sort category prefixes by label
+  const sortedPrefixes = Object.keys(CHANNEL_CATEGORIES).filter(
+    (prefix) => categorized[prefix]?.length
+  );
+
+  return (
+    <div className="space-y-3 max-h-72 overflow-y-auto rounded-md border p-3">
+      {sortedPrefixes.map((prefix) => {
+        const cat = CHANNEL_CATEGORIES[prefix];
+        const chans = categorized[prefix];
+        const ids = chans.map((c) => c.id);
+        const allSelected = ids.every((id) => selectedChannels.includes(id));
+        const someSelected = ids.some((id) => selectedChannels.includes(id));
+
+        return (
+          <div key={prefix}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                onChange={() => onToggleCategory(ids)}
+                className="rounded border-input accent-primary"
+              />
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cat.color}`}>
+                {cat.label}
+              </span>
+              <span className="text-xs text-muted-foreground">({chans.length})</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 ml-5 mb-2">
+              {chans
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((ch) => (
+                  <label key={ch.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted rounded px-1 py-0.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedChannels.includes(ch.id)}
+                      onChange={() => onToggle(ch.id)}
+                      className="rounded border-input accent-primary"
+                    />
+                    #{ch.name}
+                  </label>
+                ))}
+            </div>
+          </div>
+        );
+      })}
+
+      {groupDms.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <input
+              type="checkbox"
+              checked={groupDms.every((c) => selectedChannels.includes(c.id))}
+              ref={(el) => {
+                if (el) {
+                  const some = groupDms.some((c) => selectedChannels.includes(c.id));
+                  const all = groupDms.every((c) => selectedChannels.includes(c.id));
+                  el.indeterminate = some && !all;
+                }
+              }}
+              onChange={() => onToggleCategory(groupDms.map((c) => c.id))}
+              className="rounded border-input accent-primary"
+            />
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">
+              Group DMs
+            </span>
+            <span className="text-xs text-muted-foreground">({groupDms.length})</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 ml-5">
+            {groupDms.map((ch) => (
+              <label key={ch.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted rounded px-1 py-0.5">
+                <input
+                  type="checkbox"
+                  checked={selectedChannels.includes(ch.id)}
+                  onChange={() => onToggle(ch.id)}
+                  className="rounded border-input accent-primary"
+                />
+                {ch.name}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {uncategorized.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <input
+              type="checkbox"
+              checked={uncategorized.every((c) => selectedChannels.includes(c.id))}
+              ref={(el) => {
+                if (el) {
+                  const some = uncategorized.some((c) => selectedChannels.includes(c.id));
+                  const all = uncategorized.every((c) => selectedChannels.includes(c.id));
+                  el.indeterminate = some && !all;
+                }
+              }}
+              onChange={() => onToggleCategory(uncategorized.map((c) => c.id))}
+              className="rounded border-input accent-primary"
+            />
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-800">
+              Other
+            </span>
+            <span className="text-xs text-muted-foreground">({uncategorized.length})</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 ml-5">
+            {uncategorized
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((ch) => (
+                <label key={ch.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted rounded px-1 py-0.5">
+                  <input
+                    type="checkbox"
+                    checked={selectedChannels.includes(ch.id)}
+                    onChange={() => onToggle(ch.id)}
+                    className="rounded border-input accent-primary"
+                  />
+                  #{ch.name}
+                </label>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

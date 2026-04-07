@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Clipboard body -->
+  <rect x="96" y="80" width="320" height="400" rx="32" fill="#1e293b" stroke="#334155" stroke-width="8"/>
+  <!-- Clipboard clip -->
+  <rect x="176" y="48" width="160" height="64" rx="16" fill="#3b82f6"/>
+  <circle cx="256" cy="80" r="12" fill="#1e293b"/>
+  <!-- Checkmark -->
+  <path d="M180 260 L230 310 L340 200" stroke="#22c55e" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Lines (task rows) -->
+  <rect x="160" y="350" width="192" height="12" rx="6" fill="#475569"/>
+  <rect x="160" y="390" width="144" height="12" rx="6" fill="#475569"/>
+</svg>

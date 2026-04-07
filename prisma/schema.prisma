@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// NextAuth models (kept for future re-enable)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  emailVerified    DateTime?
+  name             String?
+  image            String?
+  role             String    @default("ADMIN")
+  slackId          String?   @unique
+  slackDisplayName String?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  accounts     Account[]
+  sessions     Session[]
+  ownedTasks   Task[]              @relation("TaskOwner")
+  createdTasks Task[]              @relation("TaskCreator")
+  comments     TaskComment[]
+  history      TaskHistory[]
+  extensions   DeadlineExtension[]
+}
+
+model Task {
+  id               String    @id @default(cuid())
+  title            String    @default("")
+  description      String
+  ownerId          String
+  creatorId        String
+  deadline         DateTime
+  originalDeadline DateTime
+  revisedDeadline  DateTime?
+  extensionReason  String?
+  priority         String    @default("MEDIUM")
+  status           String    @default("NOT_STARTED")
+  sourceType       String    @default("MANUAL")
+  sourceReference  String?
+  slackChannel     String?
+  notes            String?
+  isOverdue        Boolean   @default(false)
+  deadlineMissed   Boolean   @default(false)
+  lastFollowUp     DateTime?
+  completionDate   DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  owner      User                @relation("TaskOwner", fields: [ownerId], references: [id])
+  creator    User                @relation("TaskCreator", fields: [creatorId], references: [id])
+  comments   TaskComment[]
+  history    TaskHistory[]
+  extensions DeadlineExtension[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([deadline])
+  @@index([isOverdue])
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([taskId])
+}
+
+model TaskHistory {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  field     String
+  oldValue  String?
+  newValue  String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([taskId])
+}
+
+model DeadlineExtension {
+  id               String   @id @default(cuid())
+  taskId           String
+  originalDeadline DateTime
+  revisedDeadline  DateTime
+  reason           String?
+  extendedById     String
+  createdAt        DateTime @default(now())
+
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  extendedBy User @relation(fields: [extendedById], references: [id])
+
+  @@index([taskId])
+}
+
+model SlackMember {
+  id           String   @id @default(cuid())
+  slackId      String   @unique
+  displayName  String?
+  realName     String?
+  email        String?
+  isBot        Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  lastSyncedAt DateTime @default(now())
+}

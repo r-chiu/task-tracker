@@ -2,6 +2,9 @@
 
 # dependencies
 /node_modules
+
+# local cache
+.channel-cache.json
 /.pnp
 .pnp.*
 .yarn/*
@@ -32,6 +35,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local database
+dev.db
+
+# claude
+.claude/
 
 # vercel
 .vercel
@@ -39,3 +49,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
