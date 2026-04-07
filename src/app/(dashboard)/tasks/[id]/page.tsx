@@ -23,7 +23,7 @@ import { DeadlineExtensionDialog } from "@/components/tasks/deadline-extension-d
 import { STATUS_LABELS, PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/constants";
 import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function TaskDetailPage() {
@@ -31,6 +31,8 @@ export default function TaskDetailPage() {
   const router = useRouter();
   const [task, setTask] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState("");
 
   const fetchTask = useCallback(async () => {
     const res = await fetch(`/api/tasks/${id}`);
@@ -117,9 +119,52 @@ export default function TaskDetailPage() {
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
-            <div>
-              <CardTitle className="text-xl">{task.title || task.description}</CardTitle>
-              {task.title && task.description && (
+            <div className="min-w-0 flex-1">
+              {editingTitle ? (
+                <input
+                  type="text"
+                  className="w-full text-xl font-semibold bg-transparent border-b-2 border-primary focus:outline-none px-0 py-0.5"
+                  value={titleValue}
+                  onChange={(e) => setTitleValue(e.target.value)}
+                  onBlur={() => {
+                    const trimmed = titleValue.trim();
+                    if (trimmed && trimmed !== (task.title || task.description)) {
+                      updateField("title", trimmed);
+                    }
+                    setEditingTitle(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Escape") setEditingTitle(false);
+                  }}
+                  autoFocus
+                />
+              ) : (
+                <div className="group flex items-center gap-2">
+                  <CardTitle
+                    className="text-xl cursor-pointer hover:text-primary/80 transition-colors"
+                    title="Click to edit task name"
+                    onClick={() => {
+                      setTitleValue(task.title || task.description);
+                      setEditingTitle(true);
+                    }}
+                  >
+                    {task.title || task.description}
+                  </CardTitle>
+                  <button
+                    type="button"
+                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground p-1"
+                    title="Edit task name"
+                    onClick={() => {
+                      setTitleValue(task.title || task.description);
+                      setEditingTitle(true);
+                    }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              {task.title && task.description && !editingTitle && (
                 <p className="text-sm text-muted-foreground mt-1">{task.description}</p>
               )}
             </div>

@@ -174,3 +174,10 @@ model DismissedActionItem {
 
   @@index([contentHash])
 }
+
+/// Simple key-value store for app-wide settings (e.g. shared channel selection)
+model AppSetting {
+  key       String   @id
+  value     String   // JSON string
+  updatedAt DateTime @default(now())
+}

@@ -186,62 +186,45 @@ async function _fetchChannelsFromSlack() {
   }
 
   // Fetch group DMs (mpim) — requires mpim:read scope
-  // Note: Slack's `updated` field on mpim is unreliable, so we check actual
-  // message history to find recently active DMs.
+  // Only fetch the first page (most recently active) to avoid rate limits.
+  // Slack returns mpim channels sorted by activity, so page 1 has the recent ones.
   const raySlackId = process.env.RAY_SLACK_USER_ID;
   try {
-    const allGroupDms: { id: string; name: string }[] = [];
+    const groupDms: { id: string; name: string }[] = [];
+    // Fetch just 2 pages max (up to 100 DMs) — enough to cover recent activity
     let mpimCursor: string | undefined;
+    let mpimPages = 0;
     do {
       const result = await slackUser.conversations.list({
         cursor: mpimCursor,
-        limit: 200,
+        limit: 50,
         types: "mpim",
         exclude_archived: true,
       });
       for (const ch of result.channels ?? []) {
         if (ch.id) {
-          allGroupDms.push({
+          groupDms.push({
             id: ch.id,
             name: ch.name || ch.id,
           });
         }
       }
       mpimCursor = result.response_metadata?.next_cursor || undefined;
-    } while (mpimCursor);
+      mpimPages++;
+    } while (mpimCursor && mpimPages < 2);
 
-    // Check actual message history to find recently active DMs (last 90 days)
-    // Process in batches of 10 to stay within rate limits
-    const ninetyDaysAgo = String(Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60);
-    const recentDms: { id: string; name: string; lastTs: number }[] = [];
+    // Always include known important group DMs — prepend them so they're never cut off
+    const importantDmIds = (process.env.SLACK_IMPORTANT_DMS || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const seen = new Set(groupDms.map((d) => d.id));
+    const priorityDms = importantDmIds
+      .filter((id) => !seen.has(id))
+      .map((id) => ({ id, name: id }));
 
-    for (let i = 0; i < allGroupDms.length; i += 10) {
-      const batch = allGroupDms.slice(i, i + 10);
-      const results = await Promise.allSettled(
-        batch.map(async (dm) => {
-          const hist = await slackUser.conversations.history({
-            channel: dm.id,
-            limit: 1,
-            oldest: ninetyDaysAgo,
-          });
-          const lastMsg = hist.messages?.[0];
-          if (lastMsg?.ts) {
-            return { ...dm, lastTs: parseFloat(lastMsg.ts) };
-          }
-          return null;
-        })
-      );
-      for (const r of results) {
-        if (r.status === "fulfilled" && r.value) {
-          recentDms.push(r.value);
-        }
-      }
-      // Stop early if we have enough — 50 recent DMs is plenty
-      if (recentDms.length >= 50) break;
-    }
+    // Put important DMs first, then the rest
+    const allDms = [...priorityDms, ...groupDms];
 
-    // Sort by most recent message first
-    recentDms.sort((a, b) => b.lastTs - a.lastTs);
+    // Take up to 50 DMs
+    const dmsToResolve = allDms.slice(0, 50);
 
     // Pre-load all workspace members for fast name resolution
     const { prisma: _prisma } = await import("@/lib/prisma");
@@ -254,30 +237,81 @@ async function _fetchChannelsFromSlack() {
       memberNameMap.set(m.slackId, m.displayName || m.realName || m.slackId);
     }
 
-    // Resolve member names for each group DM (cap at 50 DMs)
-    const dmsToResolve = recentDms.slice(0, 50);
-    const resolvedDms = await Promise.allSettled(
-      dmsToResolve.map(async (dm) => {
-        try {
+    // Collect all member IDs for each DM (including Ray, for filtering)
+    const dmAllMemberIds = new Map<string, string[]>(); // dm.id -> all memberIds
+    for (let i = 0; i < dmsToResolve.length; i += 5) {
+      const batch = dmsToResolve.slice(i, i + 5);
+      const results = await Promise.allSettled(
+        batch.map(async (dm) => {
           const info = await slackUser.conversations.members({ channel: dm.id, limit: 20 });
-          const memberIds = (info.members ?? []).filter((id) => id !== raySlackId);
-          const memberNames = memberIds
-            .map((mid) => memberNameMap.get(mid) || mid)
-            .filter(Boolean);
-          const friendlyName = memberNames.length > 0
-            ? memberNames.join(", ")
-            : dm.name;
-          return { ...dm, name: friendlyName };
-        } catch {
+          dmAllMemberIds.set(dm.id, info.members ?? []);
           return dm;
-        }
-      })
-    );
+        })
+      );
+      // no-op — results stored in map
+      void results;
+    }
 
-    for (const r of resolvedDms) {
-      if (r.status === "fulfilled") {
-        channels.push({ id: r.value.id, name: r.value.name, type: "group_dm" });
+    // Find all IDs not in memberNameMap and fetch their info (name + active status)
+    const unknownIds = new Set<string>();
+    for (const ids of dmAllMemberIds.values()) {
+      for (const id of ids) {
+        if (!memberNameMap.has(id) && id !== raySlackId) unknownIds.add(id);
       }
+    }
+
+    // Track inactive users
+    const inactiveUserIds = new Set<string>();
+
+    // Fetch unknown users in batches of 5 (use bot token — user token lacks users:read)
+    const unknownArr = [...unknownIds];
+    for (let i = 0; i < unknownArr.length; i += 5) {
+      const batch = unknownArr.slice(i, i + 5);
+      const results = await Promise.allSettled(
+        batch.map(async (uid) => {
+          const info = await slack.users.info({ user: uid });
+          const name = info.user?.profile?.display_name || info.user?.real_name || info.user?.name || uid;
+          const isDeleted = info.user?.deleted ?? false;
+          return { uid, name, isDeleted };
+        })
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          memberNameMap.set(r.value.uid, r.value.name);
+          if (r.value.isDeleted) inactiveUserIds.add(r.value.uid);
+        }
+      }
+    }
+
+    // Also mark inactive members from DB
+    const inactiveDbMembers = await _prisma.slackMember.findMany({
+      where: { isActive: false },
+      select: { slackId: true },
+    });
+    for (const m of inactiveDbMembers) {
+      inactiveUserIds.add(m.slackId);
+    }
+
+    // Build friendly names — only include DMs where Ray is a member
+    // and all other members are active
+    for (const dm of dmsToResolve) {
+      const allIds = dmAllMemberIds.get(dm.id);
+      if (!allIds) continue;
+
+      // Skip if Ray is not in this group DM
+      if (raySlackId && !allIds.includes(raySlackId)) continue;
+
+      // Skip if any member is inactive/deleted
+      const otherIds = allIds.filter((id) => id !== raySlackId);
+      if (otherIds.some((id) => inactiveUserIds.has(id))) continue;
+
+      const memberNames = otherIds
+        .map((mid) => memberNameMap.get(mid) || mid)
+        .filter(Boolean);
+      const friendlyName = memberNames.length > 0
+        ? memberNames.join(", ")
+        : dm.name;
+      channels.push({ id: dm.id, name: friendlyName, type: "group_dm" });
     }
   } catch {
     // mpim:read scope may not be granted — skip silently

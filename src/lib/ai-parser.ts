@@ -1,5 +1,4 @@
 import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
 
 export interface AIParsedItem {
   description: string;
@@ -10,20 +9,12 @@ export interface AIParsedItem {
   title: string;
 }
 
-// Lazy-init clients (only when keys are available)
-let anthropicClient: Anthropic | null = null;
-let openaiClient: OpenAI | null = null;
+let client: Anthropic | null = null;
 
-function getAnthropic(): Anthropic | null {
+function getClient(): Anthropic | null {
   if (!process.env.ANTHROPIC_API_KEY) return null;
-  if (!anthropicClient) anthropicClient = new Anthropic();
-  return anthropicClient;
-}
-
-function getOpenAI(): OpenAI | null {
-  if (!process.env.OPENAI_API_KEY) return null;
-  if (!openaiClient) openaiClient = new OpenAI();
-  return openaiClient;
+  if (!client) client = new Anthropic();
+  return client;
 }
 
 // ============================================================================
@@ -72,153 +63,311 @@ Return valid JSON only in this format:
 {"task_name":"<task name>"}`;
 
 // ============================================================================
-// TITLE GENERATION — tries Anthropic, then OpenAI, then returns null
+// OLLAMA (LOCAL LLM) FALLBACK
 // ============================================================================
 
-async function titleViaAnthropic(description: string): Promise<string | null> {
-  const client = getAnthropic();
-  if (!client) return null;
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss";
 
-  const response = await client.messages.create({
-    model: "claude-haiku-4-20250414",
-    max_tokens: 100,
-    system: TITLE_PROMPT,
-    messages: [{ role: "user", content: `Text to analyze:\n${description}` }],
-  });
+const OLLAMA_TITLE_PROMPT = `Analyze the text and identify the single main actionable task.
 
-  const content = response.content[0];
-  if (content.type !== "text") return null;
-  const parsed = JSON.parse(content.text.trim());
-  return (parsed.task_name || "").trim() || null;
+Rules:
+- Prefer format: Verb + object
+- Use 3 to 7 words
+- Keep it specific and concise
+- No punctuation unless necessary
+- No explanation
+- If multiple tasks exist, choose the highest-priority one using this order:
+  1. Explicit request
+  2. Urgent or deadline-driven task
+  3. Blocking dependency
+  4. First actionable item mentioned
+- If there is no clear action, return the main topic as a short noun phrase
+- Avoid generic outputs like "Review task", "Handle issue", "General follow-up"
+- Never return anything except valid JSON`;
+
+async function titleViaOllama(description: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages: [
+          { role: "system", content: OLLAMA_TITLE_PROMPT },
+          { role: "user", content: `Text:\n${description}` },
+        ],
+        stream: false,
+        options: { temperature: 0 },
+        format: {
+          type: "object",
+          properties: {
+            task_name: { type: "string" },
+          },
+          required: ["task_name"],
+        },
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = data?.message?.content?.trim();
+    if (!text) return null;
+
+    const parsed = JSON.parse(text);
+    return (parsed.task_name || "").trim() || null;
+  } catch (err) {
+    console.error("Ollama title generation error:", err);
+    return null;
+  }
 }
 
-async function titleViaOpenAI(description: string): Promise<string | null> {
-  const client = getOpenAI();
-  if (!client) return null;
+// ============================================================================
+// GROQ (FREE CLOUD LLM) FALLBACK
+// ============================================================================
 
-  const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    max_tokens: 100,
-    messages: [
-      { role: "system", content: TITLE_PROMPT },
-      { role: "user", content: `Text to analyze:\n${description}` },
-    ],
-  });
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 
-  const text = response.choices[0]?.message?.content?.trim();
-  if (!text) return null;
-  const parsed = JSON.parse(text);
-  return (parsed.task_name || "").trim() || null;
+async function titleViaGroq(description: string): Promise<string | null> {
+  if (!GROQ_API_KEY) return null;
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [
+          { role: "system", content: OLLAMA_TITLE_PROMPT },
+          { role: "user", content: `Text:\n${description}` },
+        ],
+        temperature: 0,
+        max_tokens: 100,
+        response_format: { type: "json_object" },
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = data?.choices?.[0]?.message?.content?.trim();
+    if (!text) return null;
+
+    const parsed = JSON.parse(text);
+    return (parsed.task_name || "").trim() || null;
+  } catch (err) {
+    console.error("Groq title generation error:", err);
+    return null;
+  }
 }
+
+async function parseViaGroq(text: string): Promise<AIParsedItem[] | null> {
+  if (!GROQ_API_KEY) return null;
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const dayOfWeek = new Date().toLocaleDateString("en-US", { weekday: "long" });
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [
+          { role: "system", content: PARSE_PROMPT },
+          {
+            role: "user",
+            content: `Today is ${dayOfWeek}, ${today}.\n\nAnalyze this text and extract any action items:\n\n${text}`,
+          },
+        ],
+        temperature: 0,
+        max_tokens: 1024,
+        response_format: { type: "json_object" },
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content?.trim();
+    if (!content) return null;
+
+    const parsed = JSON.parse(content);
+    return (parsed.items || []).map((item: Record<string, unknown>) => ({
+      description: (item.description as string) || text.trim(),
+      title: (item.title as string) || "",
+      suggestedOwner: (item.suggestedOwner as string) || null,
+      suggestedDeadline: (item.suggestedDeadline as string) || null,
+      suggestedPriority: (item.suggestedPriority as string) || "MEDIUM",
+      confidence: (item.confidence as string) || "medium",
+    }));
+  } catch (err) {
+    console.error("Groq parser error:", err);
+    return null;
+  }
+}
+
+// ============================================================================
+// TITLE GENERATION
+// ============================================================================
 
 /**
  * Generate a concise task title from a description.
- * Tries Anthropic first, falls back to OpenAI, returns null if both fail.
+ * Chain: Anthropic → Groq (free) → Ollama (local) → null (callers fall back to regex).
  */
 export async function aiGenerateTitle(description: string): Promise<string | null> {
   // Try Anthropic first
-  try {
-    const title = await titleViaAnthropic(description);
-    if (title) return title;
-  } catch (err) {
-    console.error("Anthropic title error:", err);
+  const api = getClient();
+  if (api) {
+    try {
+      const response = await api.messages.create({
+        model: "claude-haiku-4-20250414",
+        max_tokens: 100,
+        system: TITLE_PROMPT,
+        messages: [{ role: "user", content: `Text to analyze:\n${description}` }],
+      });
+
+      const content = response.content[0];
+      if (content.type === "text") {
+        const parsed = JSON.parse(content.text.trim());
+        const title = (parsed.task_name || "").trim();
+        if (title) return title;
+      }
+    } catch (err) {
+      console.error("Anthropic title generation error:", err);
+    }
   }
 
-  // Fall back to OpenAI
-  try {
-    const title = await titleViaOpenAI(description);
-    if (title) return title;
-  } catch (err) {
-    console.error("OpenAI title error:", err);
-  }
+  // Fall back to Groq (free cloud)
+  const groqTitle = await titleViaGroq(description);
+  if (groqTitle) return groqTitle;
 
-  return null;
+  // Fall back to local Ollama
+  return titleViaOllama(description);
 }
 
 // ============================================================================
-// TEXT PARSING — tries Anthropic, then OpenAI, then returns null
+// TEXT PARSING
 // ============================================================================
 
-async function parseViaAnthropic(text: string): Promise<AIParsedItem[] | null> {
-  const client = getAnthropic();
-  if (!client) return null;
+/**
+ * Parse action items via local Ollama. Returns null on failure.
+ */
+async function parseViaOllama(text: string): Promise<AIParsedItem[] | null> {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const dayOfWeek = new Date().toLocaleDateString("en-US", { weekday: "long" });
 
-  const today = new Date().toISOString().split("T")[0];
-  const dayOfWeek = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages: [
+          { role: "system", content: PARSE_PROMPT },
+          {
+            role: "user",
+            content: `Today is ${dayOfWeek}, ${today}.\n\nAnalyze this text and extract any action items:\n\n${text}`,
+          },
+        ],
+        stream: false,
+        options: { temperature: 0 },
+        format: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string" },
+                  title: { type: "string" },
+                  suggestedOwner: { type: "string" },
+                  suggestedDeadline: { type: "string" },
+                  suggestedPriority: { type: "string" },
+                  confidence: { type: "string" },
+                },
+                required: ["description", "title", "suggestedPriority", "confidence"],
+              },
+            },
+          },
+          required: ["items"],
+        },
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
 
-  const response = await client.messages.create({
-    model: "claude-haiku-4-20250414",
-    max_tokens: 1024,
-    system: PARSE_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Today is ${dayOfWeek}, ${today}.\n\nAnalyze this text and extract any action items:\n\n${text}`,
-      },
-    ],
-  });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const content = data?.message?.content?.trim();
+    if (!content) return null;
 
-  const content = response.content[0];
-  if (content.type !== "text") return null;
-  return parseParsedResponse(content.text, text);
-}
-
-async function parseViaOpenAI(text: string): Promise<AIParsedItem[] | null> {
-  const client = getOpenAI();
-  if (!client) return null;
-
-  const today = new Date().toISOString().split("T")[0];
-  const dayOfWeek = new Date().toLocaleDateString("en-US", { weekday: "long" });
-
-  const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    max_tokens: 1024,
-    messages: [
-      { role: "system", content: PARSE_PROMPT },
-      {
-        role: "user",
-        content: `Today is ${dayOfWeek}, ${today}.\n\nAnalyze this text and extract any action items:\n\n${text}`,
-      },
-    ],
-  });
-
-  const responseText = response.choices[0]?.message?.content?.trim();
-  if (!responseText) return null;
-  return parseParsedResponse(responseText, text);
-}
-
-function parseParsedResponse(responseText: string, originalText: string): AIParsedItem[] {
-  const parsed = JSON.parse(responseText);
-  return (parsed.items || []).map((item: Record<string, unknown>) => ({
-    description: (item.description as string) || originalText.trim(),
-    title: (item.title as string) || "",
-    suggestedOwner: (item.suggestedOwner as string) || null,
-    suggestedDeadline: (item.suggestedDeadline as string) || null,
-    suggestedPriority: (item.suggestedPriority as string) || "MEDIUM",
-    confidence: (item.confidence as string) || "medium",
-  }));
+    const parsed = JSON.parse(content);
+    return (parsed.items || []).map((item: Record<string, unknown>) => ({
+      description: (item.description as string) || text.trim(),
+      title: (item.title as string) || "",
+      suggestedOwner: (item.suggestedOwner as string) || null,
+      suggestedDeadline: (item.suggestedDeadline as string) || null,
+      suggestedPriority: (item.suggestedPriority as string) || "MEDIUM",
+      confidence: (item.confidence as string) || "medium",
+    }));
+  } catch (err) {
+    console.error("Ollama parser error:", err);
+    return null;
+  }
 }
 
 /**
- * Detect and extract action items from text using AI.
- * Tries Anthropic first, falls back to OpenAI, returns null if both fail.
+ * Detect and extract action items from text.
+ * Chain: Anthropic → Groq (free) → Ollama (local) → null (callers fall back to regex).
  */
 export async function aiParseText(text: string): Promise<AIParsedItem[] | null> {
   // Try Anthropic first
-  try {
-    const items = await parseViaAnthropic(text);
-    if (items !== null) return items;
-  } catch (err) {
-    console.error("Anthropic parse error:", err);
+  const api = getClient();
+  if (api) {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const dayOfWeek = new Date().toLocaleDateString("en-US", { weekday: "long" });
+
+      const response = await api.messages.create({
+        model: "claude-haiku-4-20250414",
+        max_tokens: 1024,
+        system: PARSE_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: `Today is ${dayOfWeek}, ${today}.\n\nAnalyze this text and extract any action items:\n\n${text}`,
+          },
+        ],
+      });
+
+      const content = response.content[0];
+      if (content.type === "text") {
+        const parsed = JSON.parse(content.text);
+        return (parsed.items || []).map((item: Record<string, unknown>) => ({
+          description: (item.description as string) || text.trim(),
+          title: (item.title as string) || "",
+          suggestedOwner: (item.suggestedOwner as string) || null,
+          suggestedDeadline: (item.suggestedDeadline as string) || null,
+          suggestedPriority: (item.suggestedPriority as string) || "MEDIUM",
+          confidence: (item.confidence as string) || "medium",
+        }));
+      }
+    } catch (err) {
+      console.error("Anthropic parser error:", err);
+    }
   }
 
-  // Fall back to OpenAI
-  try {
-    const items = await parseViaOpenAI(text);
-    if (items !== null) return items;
-  } catch (err) {
-    console.error("OpenAI parse error:", err);
-  }
+  // Fall back to Groq (free cloud)
+  const groqResult = await parseViaGroq(text);
+  if (groqResult) return groqResult;
 
-  return null;
+  // Fall back to local Ollama
+  return parseViaOllama(text);
 }

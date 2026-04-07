@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,25 +84,23 @@ export function TaskForm() {
   const [slackMembers, setSlackMembers] = useState<SlackMember[]>([]);
   const [allSlackMembers, setAllSlackMembers] = useState<SlackMember[]>([]);
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
+  const [loadingChannels, setLoadingChannels] = useState(true);
   const [selectedChannels, _setSelectedChannels] = useState<string[]>([]);
   const [defaultsApplied, setDefaultsApplied] = useState(false);
 
-  // Persist channel selection to localStorage — save both IDs and names for resilience
-  const STORAGE_KEY = "task-tracker:selected-channels";
-  const STORAGE_KEY_NAMES = "task-tracker:selected-channel-names";
+  // Persist channel selection to server (shared across all users)
   const setSelectedChannels = (value: string[] | ((prev: string[]) => string[])) => {
     _setSelectedChannels((prev) => {
       const next = typeof value === "function" ? value(prev) : value;
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        // Also save channel names for resilience (IDs may change between server restarts)
-        const names = next
-          .map((id) => slackChannels.find((ch) => ch.id === id)?.name)
-          .filter(Boolean);
-        if (names.length > 0) {
-          localStorage.setItem(STORAGE_KEY_NAMES, JSON.stringify(names));
-        }
-      } catch {}
+      // Save to server in background
+      const names = next
+        .map((id) => slackChannels.find((ch) => ch.id === id)?.name)
+        .filter(Boolean);
+      fetch("/api/settings/channels", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: next, names }),
+      }).catch(() => {});
       return next;
     });
   };
@@ -129,6 +127,9 @@ export function TaskForm() {
   // Parse from source text
   const [sourceText, setSourceText] = useState("");
   const [parsedItems, setParsedItems] = useState<any[]>([]);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  // Custom titles edited on action item cards (keyed by index)
+  const [itemTitles, setItemTitles] = useState<Record<number, string>>({});
   // Track dismissed/used action item hashes (content hash → reason)
   const [dismissedHashes, setDismissedHashes] = useState<Record<string, string>>({});
 
@@ -175,59 +176,112 @@ export function TaskForm() {
     fetch("/api/slack/members").then((r) => r.json()).then((d) => setSlackMembers(Array.isArray(d) ? d : []));
     // Fetch all members (including bots/deactivated) for name resolution
     fetch("/api/slack/members?all=1").then((r) => r.json()).then((d) => setAllSlackMembers(Array.isArray(d) ? d : []));
-    fetch("/api/slack/channels").then((r) => r.json()).then((d) => {
+    fetch("/api/slack/channels").then((r) => r.json()).then(async (d) => {
       const channels = Array.isArray(d) ? d : [];
       setSlackChannels(channels);
+      setLoadingChannels(false);
       if (!defaultsApplied && channels.length > 0) {
-        // Restore saved selection from localStorage, or fall back to defaults
+        // Restore saved selection from server (shared across all users)
         let restored = false;
         try {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          if (saved) {
-            const ids = JSON.parse(saved) as string[];
-            // Validate that saved IDs still exist in current channel list
+          const settingsRes = await fetch("/api/settings/channels");
+          const settings = await settingsRes.json();
+          if (settings.ids?.length > 0) {
             const validIds = new Set(channels.map((ch: SlackChannel) => ch.id));
-            const filtered = ids.filter((id) => validIds.has(id));
+            const filtered = settings.ids.filter((id: string) => validIds.has(id));
             if (filtered.length > 0) {
               _setSelectedChannels(filtered);
               restored = true;
+            } else if (settings.names?.length > 0) {
+              // IDs changed — try matching by name
+              const nameSet = new Set(settings.names);
+              const matchedIds = channels
+                .filter((ch: SlackChannel) => nameSet.has(ch.name))
+                .map((ch: SlackChannel) => ch.id);
+              if (matchedIds.length > 0) {
+                _setSelectedChannels(matchedIds);
+                restored = true;
+              }
             }
           }
-          // If IDs didn't match (e.g. server restart changed cache), try restoring by name
-          if (!restored) {
-            const savedNames = localStorage.getItem(STORAGE_KEY_NAMES);
-            if (savedNames) {
-              const names = JSON.parse(savedNames) as string[];
+        } catch {}
+        // If server has no saved selection, try migrating from localStorage (one-time)
+        if (!restored) {
+          try {
+            const localIds = localStorage.getItem("task-tracker:selected-channels");
+            const localNames = localStorage.getItem("task-tracker:selected-channel-names");
+            if (localIds) {
+              const ids = JSON.parse(localIds) as string[];
+              const validIds = new Set(channels.map((ch: SlackChannel) => ch.id));
+              const filtered = ids.filter((id) => validIds.has(id));
+              if (filtered.length > 0) {
+                _setSelectedChannels(filtered);
+                // Migrate to server
+                const names = filtered
+                  .map((id) => channels.find((ch: SlackChannel) => ch.id === id)?.name)
+                  .filter(Boolean);
+                fetch("/api/settings/channels", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ ids: filtered, names }),
+                }).catch(() => {});
+                restored = true;
+              }
+            }
+            if (!restored && localNames) {
+              const names = JSON.parse(localNames) as string[];
               const nameSet = new Set(names);
               const matchedIds = channels
                 .filter((ch: SlackChannel) => nameSet.has(ch.name))
                 .map((ch: SlackChannel) => ch.id);
               if (matchedIds.length > 0) {
                 _setSelectedChannels(matchedIds);
-                // Update ID cache with the new IDs
-                try { localStorage.setItem(STORAGE_KEY, JSON.stringify(matchedIds)); } catch {}
+                fetch("/api/settings/channels", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ ids: matchedIds, names }),
+                }).catch(() => {});
                 restored = true;
               }
             }
-          }
-        } catch {}
+          } catch {}
+        }
         if (!restored) {
           const defaultIds = channels
             .filter((ch: SlackChannel) => DEFAULT_ACTIVE_CHANNELS.includes(ch.name))
             .map((ch: SlackChannel) => ch.id);
           _setSelectedChannels(defaultIds);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultIds));
-            const defaultNames = channels
-              .filter((ch: SlackChannel) => DEFAULT_ACTIVE_CHANNELS.includes(ch.name))
-              .map((ch: SlackChannel) => ch.name);
-            localStorage.setItem(STORAGE_KEY_NAMES, JSON.stringify(defaultNames));
-          } catch {}
         }
         setDefaultsApplied(true);
       }
     });
   }, [defaultsApplied]);
+
+  // Load cached action items on mount
+  useEffect(() => {
+    fetch("/api/action-items/cache")
+      .then((r) => r.json())
+      .then(async (data) => {
+        if (data.items?.length > 0) {
+          const items = await filterDismissedItems(data.items);
+          if (items.length > 0) {
+            setParsedItems(items);
+            setCachedAt(data.cachedAt);
+          }
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save items to cache
+  const saveItemsToCache = (items: any[]) => {
+    fetch("/api/action-items/cache", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    }).catch(() => {});
+  };
 
   const handleRefreshChannels = async () => {
     setRefreshingChannels(true);
@@ -319,8 +373,18 @@ export function TaskForm() {
     }
   };
 
+  // Generate a title for an action item (used for preview and form fill)
+  const getItemTitle = (item: Record<string, unknown>, index?: number): string => {
+    // Use custom-edited title if available
+    if (index !== undefined && itemTitles[index]) return itemTitles[index];
+    // AI-generated title or regex fallback
+    const rawDesc = (item.description as string) || "";
+    const desc = humanizeSlackText(rawDesc);
+    return (item.title as string) || generateTitle(desc);
+  };
+
   // Auto-fill form from a parsed action item
-  const applyParsedItem = (item: Record<string, unknown>) => {
+  const applyParsedItem = (item: Record<string, unknown>, itemIndex?: number) => {
     const pool = allSlackMembers.length > 0 ? allSlackMembers : slackMembers;
 
     // Humanize the text (replace <@UXXXX> with @name)
@@ -333,8 +397,8 @@ export function TaskForm() {
     setForm((f) => {
       const updates: Partial<typeof f> = {};
 
-      // Title — use AI-generated title if available, fall back to regex
-      updates.title = (item.title as string) || generateTitle(desc);
+      // Title — use custom title if edited, then AI title, then regex
+      updates.title = getItemTitle(item, itemIndex);
       updates.description = desc;
 
       // Deadline
@@ -343,8 +407,13 @@ export function TaskForm() {
         if (/^\d{4}-\d{2}-\d{2}$/.test(dl)) updates.deadline = dl;
       }
 
-      // Priority
-      if (item.suggestedPriority) updates.priority = item.suggestedPriority as string;
+      // Priority — map CRITICAL → URGENT (form only supports LOW/MEDIUM/HIGH/URGENT)
+      if (item.suggestedPriority) {
+        const p = (item.suggestedPriority as string).toUpperCase();
+        const validPriorities = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+        const mapped = p === "CRITICAL" ? "URGENT" : p;
+        updates.priority = validPriorities.includes(mapped) ? mapped : "MEDIUM";
+      }
 
       // Channel
       if (item.channel) {
@@ -426,9 +495,11 @@ export function TaskForm() {
     const description = item.description || "";
     const hash = await hashContent(description);
 
-    // Immediately remove from UI
-    setParsedItems((prev) => prev.filter((_, i) => i !== index));
+    // Immediately remove from UI and update cache
+    const remaining = parsedItems.filter((_, i) => i !== index);
+    setParsedItems(remaining);
     setDismissedHashes((prev) => ({ ...prev, [hash]: "dismissed" }));
+    saveItemsToCache(remaining);
 
     // Persist to DB
     fetch("/api/action-items", {
@@ -467,6 +538,8 @@ export function TaskForm() {
     const rawItems = data.items || [];
     const items = await filterDismissedItems(rawItems);
     setParsedItems(items);
+    setCachedAt(new Date().toISOString());
+    saveItemsToCache(items);
     if (items.length > 0) {
       applyParsedItem(items[0]);
       toast.success(`Found ${items.length} actionable item(s). Task details auto-filled.`);
@@ -531,6 +604,8 @@ export function TaskForm() {
       // Filter out previously used/dismissed items
       const finalItems = await filterDismissedItems(filtered);
       setParsedItems(finalItems);
+      setCachedAt(new Date().toISOString());
+      saveItemsToCache(finalItems);
       if (finalItems.length > 0) {
         applyParsedItem(finalItems[0]);
         toast.success(`Scanned ${totalScanned} messages across ${selectedChannels.length} channel(s), found ${finalItems.length} actionable message(s). Task details auto-filled.`);
@@ -582,11 +657,13 @@ export function TaskForm() {
         }
       }
 
-      // Also remove the used item from the parsed items list
+      // Also remove the used item from the parsed items list and update cache
       const rawDesc = rawSelectedDescription || form.description;
-      setParsedItems((prev) => prev.filter((item) =>
+      const remainingItems = parsedItems.filter((item) =>
         item.description !== rawDesc && item.description !== form.description
-      ));
+      );
+      setParsedItems(remainingItems);
+      saveItemsToCache(remainingItems);
 
       if (createAnother) {
         // Reset form but keep channel selection and source type
@@ -605,11 +682,8 @@ export function TaskForm() {
         setSuggestedOwners([]);
         setRawSelectedDescription("");
         // If there are remaining parsed items, auto-fill the next one
-        const remaining = parsedItems.filter((item) =>
-          item.description !== rawDesc && item.description !== form.description
-        );
-        if (remaining.length > 0) {
-          setTimeout(() => applyParsedItem(remaining[0]), 100);
+        if (remainingItems.length > 0) {
+          setTimeout(() => applyParsedItem(remainingItems[0]), 100);
         }
       } else {
         toast.success("Task created successfully");
@@ -621,7 +695,7 @@ export function TaskForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl">
       {/* Detect from Slack */}
       <Card>
         <CardHeader>
@@ -654,7 +728,12 @@ export function TaskForm() {
                 )}
               </div>
             </div>
-            {slackChannels.length > 0 ? (
+            {loadingChannels ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Loading Slack channels...
+              </div>
+            ) : slackChannels.length > 0 ? (
               <ChannelSelector
                 channels={slackChannels}
                 selectedChannels={selectedChannels}
@@ -715,7 +794,23 @@ export function TaskForm() {
 
             return (
               <div className="rounded-md border p-3 space-y-2">
-                <p className="text-sm font-medium">Actionable Items ({sorted.length}):</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Actionable Items ({sorted.length}):</p>
+                  {cachedAt && (
+                    <span className="text-xs text-muted-foreground">
+                      Cached {(() => {
+                        const d = new Date(cachedAt);
+                        const now = new Date();
+                        const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
+                        if (diffMin < 1) return "just now";
+                        if (diffMin < 60) return `${diffMin}m ago`;
+                        const diffHrs = Math.floor(diffMin / 60);
+                        if (diffHrs < 24) return `${diffHrs}h ago`;
+                        return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                      })()}
+                    </span>
+                  )}
+                </div>
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {groups.map((group, gi) => (
                     <div key={gi}>
@@ -740,7 +835,7 @@ export function TaskForm() {
                           <div
                             key={i}
                             className="group relative text-sm p-3 rounded-md border cursor-pointer hover:bg-muted/50 hover:border-primary/30 transition-colors"
-                            onClick={() => applyParsedItem(item)}
+                            onClick={() => applyParsedItem(item, realIndex >= 0 ? realIndex : undefined)}
                           >
                             {/* Dismiss button */}
                             <button
@@ -767,6 +862,13 @@ export function TaskForm() {
                               {showOwner && <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{ownerName}</span>}
                               {item.suggestedDeadline && <span className="text-xs bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">Due: {item.suggestedDeadline}</span>}
                               {item.suggestedPriority && <span className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">{item.suggestedPriority}</span>}
+                              {item.timestamp && (() => {
+                                const d = new Date(parseFloat(item.timestamp) * 1000);
+                                const now = new Date();
+                                const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+                                const label = diffDays === 0 ? "Today" : diffDays === 1 ? "Yesterday" : diffDays < 7 ? `${diffDays}d ago` : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                                return <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{label}</span>;
+                              })()}
                             </div>
                             <p className="text-sm whitespace-pre-wrap leading-relaxed">{humanizeSlackText(item.description)}</p>
                           </div>

@@ -23,7 +23,14 @@ async function main() {
     `CREATE INDEX IF NOT EXISTS DismissedActionItem_contentHash_idx ON DismissedActionItem (contentHash)`
   );
 
-  console.log("Done! DismissedActionItem table created on Turso.");
+  console.log("Creating AppSetting table...");
+  await client.execute(`CREATE TABLE IF NOT EXISTS AppSetting (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  console.log("Done! Tables created on Turso.");
   process.exit(0);
 }
 

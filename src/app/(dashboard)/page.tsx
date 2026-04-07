@@ -112,6 +112,60 @@ export default function DashboardPage() {
     }
   };
 
+  const handleOwnerChange = async (taskId: string, newOwnerId: string) => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerId: newOwnerId }),
+      });
+      if (res.ok) {
+        toast.success("Owner updated");
+        fetchTasks();
+      } else {
+        toast.error("Failed to update owner");
+      }
+    } catch {
+      toast.error("Failed to update owner");
+    }
+  };
+
+  const handlePriorityChange = async (taskId: string, newPriority: string) => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority: newPriority }),
+      });
+      if (res.ok) {
+        toast.success("Priority updated");
+        fetchTasks();
+      } else {
+        toast.error("Failed to update priority");
+      }
+    } catch {
+      toast.error("Failed to update priority");
+    }
+  };
+
+  const handleTitleChange = async (taskId: string, newTitle: string) => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      if (res.ok) {
+        toast.success("Task name updated");
+        fetchTasks();
+      } else {
+        toast.error("Failed to update task name");
+      }
+    } catch {
+      toast.error("Failed to update task name");
+    }
+  };
+
   const handleSendReminders = async () => {
     setSendingReminders(true);
     try {
@@ -155,11 +209,14 @@ export default function DashboardPage() {
         </div>
         <TaskTable
           tasks={activeTasks}
-        sortBy={sortBy}
-        sortOrder={sortOrder}
-        onSort={handleSort}
-        onDelete={() => fetchTasks()}
-        onStatusChange={handleStatusChange}
+          sortBy={sortBy}
+          sortOrder={sortOrder}
+          onSort={handleSort}
+          onDelete={() => fetchTasks()}
+          onStatusChange={handleStatusChange}
+          onOwnerChange={handleOwnerChange}
+          onPriorityChange={handlePriorityChange}
+          users={users}
         />
       </div>
 
@@ -185,6 +242,9 @@ export default function DashboardPage() {
               onSort={handleSort}
               onDelete={() => fetchTasks()}
               onStatusChange={handleStatusChange}
+              onOwnerChange={handleOwnerChange}
+              onPriorityChange={handlePriorityChange}
+              users={users}
             />
           )}
         </div>

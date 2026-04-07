@@ -14,7 +14,7 @@ import { TaskStatusBadge } from "./task-status-badge";
 import { TaskPriorityBadge } from "./task-priority-badge";
 import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
-import { TAIPEI_TIMEZONE, STATUS_LABELS, TaskStatus } from "@/lib/constants";
+import { TAIPEI_TIMEZONE, STATUS_LABELS, PRIORITY_LABELS, TaskStatus, TaskPriority } from "@/lib/constants";
 import { ArrowUpDown, AlarmClock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -54,6 +54,10 @@ export function TaskTable({
   onSort,
   onDelete,
   onStatusChange,
+  onOwnerChange,
+  onPriorityChange,
+  onTitleChange,
+  users = [],
 }: {
   tasks: TaskRow[];
   sortBy: string;
@@ -61,9 +65,15 @@ export function TaskTable({
   onSort: (field: string) => void;
   onDelete?: (taskId: string) => void;
   onStatusChange?: (taskId: string, newStatus: TaskStatus) => void;
+  onOwnerChange?: (taskId: string, newOwnerId: string) => void;
+  onPriorityChange?: (taskId: string, newPriority: TaskPriority) => void;
+  onTitleChange?: (taskId: string, newTitle: string) => void;
+  users?: { id: string; name: string | null; email: string }[];
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const [editTitleValue, setEditTitleValue] = useState("");
 
   const allSelected = tasks.length > 0 && selected.size === tasks.length;
   const someSelected = selected.size > 0 && selected.size < tasks.length;
@@ -200,7 +210,7 @@ export function TaskTable({
             {tasks.map((task) => (
               <TableRow
                 key={task.id}
-                className={`${task.isOverdue ? "bg-red-50/50" : ""} ${selected.has(task.id) ? "bg-[#61D6D6]/10" : ""}`}
+                className={`group ${task.isOverdue ? "bg-red-50/50" : ""} ${selected.has(task.id) ? "bg-[#61D6D6]/10" : ""}`}
               >
                 <TableCell>
                   <input
@@ -212,13 +222,50 @@ export function TaskTable({
                   />
                 </TableCell>
                 <TableCell className="max-w-0">
-                  <Link
-                    href={`/tasks/${task.id}`}
-                    className="font-medium hover:underline text-primary block truncate"
-                  >
-                    {task.title || task.description}
-                  </Link>
-                  {task.title && task.description && (
+                  {editingTitle === task.id ? (
+                    <input
+                      type="text"
+                      className="w-full text-sm font-medium bg-transparent border-b-2 border-primary focus:outline-none px-0 py-0.5"
+                      value={editTitleValue}
+                      onChange={(e) => setEditTitleValue(e.target.value)}
+                      onBlur={() => {
+                        const trimmed = editTitleValue.trim();
+                        if (trimmed && trimmed !== (task.title || task.description)) {
+                          onTitleChange?.(task.id, trimmed);
+                        }
+                        setEditingTitle(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                        if (e.key === "Escape") setEditingTitle(null);
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    <div className="flex items-center gap-1 min-w-0">
+                      <Link
+                        href={`/tasks/${task.id}`}
+                        className="font-medium hover:underline text-primary truncate"
+                      >
+                        {task.title || task.description}
+                      </Link>
+                      {onTitleChange && (
+                        <button
+                          type="button"
+                          className="shrink-0 opacity-0 group-hover:opacity-100 hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-foreground p-0.5"
+                          title="Edit task name"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTitle(task.id);
+                            setEditTitleValue(task.title || task.description);
+                          }}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {task.title && task.description && editingTitle !== task.id && (
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {task.description}
                     </p>
@@ -247,10 +294,48 @@ export function TaskTable({
                   </DropdownMenu>
                 </TableCell>
                 <TableCell className="text-sm truncate">
-                  {task.owner.name || task.owner.email}
+                  {onOwnerChange && users.length > 0 ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="cursor-pointer focus:outline-none hover:underline text-left truncate block max-w-full">
+                        {task.owner.name || task.owner.email}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                        {users.map((u) => (
+                          <DropdownMenuItem
+                            key={u.id}
+                            onClick={() => onOwnerChange(task.id, u.id)}
+                            className={task.owner.id === u.id ? "font-semibold" : ""}
+                          >
+                            {u.name || u.email}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : (
+                    task.owner.name || task.owner.email
+                  )}
                 </TableCell>
                 <TableCell>
-                  <TaskPriorityBadge priority={task.priority} />
+                  {onPriorityChange ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="cursor-pointer focus:outline-none">
+                        <TaskPriorityBadge priority={task.priority} />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start">
+                        {(Object.keys(PRIORITY_LABELS) as TaskPriority[]).map((p) => (
+                          <DropdownMenuItem
+                            key={p}
+                            onClick={() => onPriorityChange(task.id, p)}
+                            className={task.priority === p ? "font-semibold" : ""}
+                          >
+                            {PRIORITY_LABELS[p]}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : (
+                    <TaskPriorityBadge priority={task.priority} />
+                  )}
                 </TableCell>
                 <TableCell
                   className={`text-sm ${deadlineColor(task.deadline, task.isOverdue, task.status)}`}
