@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/mock-user";
-import { humanizeTasks } from "@/lib/task-utils";
+import { humanizeTasks, isTaskOverdue } from "@/lib/task-utils";
 import { z } from "zod/v4";
 
 const createTaskSchema = z.object({
@@ -17,6 +17,13 @@ const createTaskSchema = z.object({
 });
 
 export async function GET(req: Request) {
+  // Auto-migrate legacy statuses (NOT_STARTED, IN_PROGRESS → ACTIVE)
+  // This is idempotent and fast (no-op after first run)
+  await prisma.task.updateMany({
+    where: { status: { in: ["NOT_STARTED", "IN_PROGRESS"] } },
+    data: { status: "ACTIVE" },
+  }).catch(() => {}); // Ignore errors silently
+
   const { searchParams } = new URL(req.url);
   const owner = searchParams.get("owner");
   const status = searchParams.get("status");
@@ -44,7 +51,9 @@ export async function GET(req: Request) {
     ];
   }
 
-  const [tasks, total] = await Promise.all([
+  const includeSummary = searchParams.get("includeSummary") === "true";
+
+  const queries: Promise<unknown>[] = [
     prisma.task.findMany({
       where,
       include: {
@@ -56,14 +65,64 @@ export async function GET(req: Request) {
       take: limit,
     }),
     prisma.task.count({ where }),
-  ]);
+  ];
 
-  const humanized = await humanizeTasks(tasks as unknown as Record<string, unknown>[]);
-  return NextResponse.json({ tasks: humanized, total, page, limit });
+  // Fetch all active tasks + recently completed for summary computation
+  if (includeSummary) {
+    queries.push(
+      prisma.task.findMany({
+        where: {
+          OR: [
+            { status: { in: ["ACTIVE", "WAITING_ON_OTHERS"] } },
+            {
+              status: "COMPLETED",
+              completionDate: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+            },
+          ],
+        },
+        select: { status: true, deadline: true, revisedDeadline: true, completionDate: true },
+      })
+    );
+  }
+
+  const results = await Promise.all(queries);
+  const tasks = results[0] as Record<string, unknown>[];
+  const total = results[1] as number;
+
+  const humanized = await humanizeTasks(tasks);
+  const result: Record<string, unknown> = { tasks: humanized, total, page, limit };
+
+  if (includeSummary) {
+    const allTasks = results[2] as { status: string; deadline: Date; revisedDeadline: Date | null; completionDate: Date | null }[];
+    const now = new Date();
+    const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const activeStatuses = ["ACTIVE", "WAITING_ON_OTHERS"];
+
+    let totalActive = 0, overdue = 0, dueSoon = 0, completedThisWeek = 0;
+    for (const t of allTasks) {
+      if (activeStatuses.includes(t.status)) {
+        totalActive++;
+        if (isTaskOverdue(t)) {
+          overdue++;
+        } else {
+          const effective = t.revisedDeadline ?? t.deadline;
+          if (effective >= now && effective <= threeDaysFromNow) {
+            dueSoon++;
+          }
+        }
+      }
+      if (t.status === "COMPLETED" && t.completionDate) {
+        completedThisWeek++;
+      }
+    }
+    result.summary = { totalActive, overdue, dueSoon, completedThisWeek };
+  }
+
+  return NextResponse.json(result);
 }
 
 export async function POST(req: Request) {
-  const user = getCurrentUser();
+  const user = await getCurrentUser();
   const body = await req.json();
   const parsed = createTaskSchema.safeParse(body);
   if (!parsed.success) {

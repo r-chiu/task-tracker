@@ -77,7 +77,7 @@ model Task {
   revisedDeadline  DateTime?
   extensionReason  String?
   priority         String    @default("MEDIUM")
-  status           String    @default("NOT_STARTED")
+  status           String    @default("ACTIVE")
   sourceType       String    @default("MANUAL")
   sourceReference  String?
   slackChannel     String?

@@ -12,16 +12,23 @@ export function TaskStatusBadge({
   isOverdue?: boolean;
   hasRevision?: boolean;
 }) {
+  const isActive = status !== "COMPLETED" && status !== "CANCELLED";
+
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1">
       <Badge
         variant="secondary"
-        className={`${STATUS_COLORS[status]} ${isOverdue ? "ring-2 ring-red-400 bg-red-50 text-red-700" : ""}`}
+        className={`${STATUS_COLORS[status] || "bg-gray-100 text-gray-600"} ${isOverdue && isActive ? "ring-2 ring-red-400 bg-red-50 text-red-700" : ""}`}
       >
-        {isOverdue && status !== "COMPLETED" && status !== "CANCELLED"
+        {isOverdue && isActive
           ? "Overdue"
-          : STATUS_LABELS[status]}
+          : STATUS_LABELS[status] || status}
       </Badge>
+      {isOverdue && status === "WAITING_ON_OTHERS" && (
+        <Badge variant="outline" className="border-yellow-400 text-yellow-700 text-xs">
+          Waiting
+        </Badge>
+      )}
       {hasRevision && (
         <Badge variant="outline" className="border-purple-300 text-purple-600 text-xs">
           Rescheduled
