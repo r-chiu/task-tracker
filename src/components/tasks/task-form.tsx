@@ -1103,10 +1103,10 @@ export function TaskForm() {
             </div>
             <div className="space-y-2">
               <Label>Slack Channel</Label>
-              <Input
-                placeholder="#channel-name"
+              <ChannelSearchInput
+                channels={slackChannels}
                 value={form.slackChannel}
-                onChange={(e) => setForm((f) => ({ ...f, slackChannel: e.target.value }))}
+                onChange={(v) => setForm((f) => ({ ...f, slackChannel: v }))}
               />
             </div>
           </div>
@@ -1277,6 +1277,74 @@ function ChannelSelector({
                 </label>
               ))}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChannelSearchInput({
+  channels,
+  value,
+  onChange,
+}: {
+  channels: SlackChannel[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  // Sync external value changes (e.g. from applyParsedItem)
+  useEffect(() => { setQuery(value); }, [value]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const normalized = query.replace(/^#/, "").toLowerCase().trim();
+  const filtered = normalized
+    ? channels.filter((ch) => ch.name.toLowerCase().includes(normalized))
+    : channels;
+
+  return (
+    <div ref={ref} className="relative">
+      <Input
+        placeholder="#channel-name"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
+          {filtered.slice(0, 30).map((ch) => (
+            <button
+              key={ch.id}
+              type="button"
+              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${
+                value === `#${ch.name}` ? "bg-muted font-medium" : ""
+              }`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const val = `#${ch.name}`;
+                setQuery(val);
+                onChange(val);
+                setOpen(false);
+              }}
+            >
+              #{ch.name}
+            </button>
+          ))}
         </div>
       )}
     </div>
