@@ -47,13 +47,24 @@ export async function POST(
     },
   });
 
+  // Record extension request
+  await recordTaskChange(
+    id,
+    user.id,
+    "extension_requested",
+    task.deadline.toISOString(),
+    revisedDeadline,
+    reason ? `Extension requested: ${reason}` : "Extension requested"
+  );
+
+  // Record approval (web UI extensions are auto-approved by the current user)
   await recordTaskChange(
     id,
     user.id,
     "deadline",
     task.deadline.toISOString(),
     newDeadline.toISOString(),
-    reason ? `Extended: ${reason}` : "Deadline extended"
+    reason ? `Extension approved: ${reason}` : "Extension approved"
   );
 
   return NextResponse.json(updated);
