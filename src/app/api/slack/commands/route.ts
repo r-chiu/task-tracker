@@ -110,7 +110,7 @@ export async function POST(req: Request) {
     if (!parsed.ownerSlackId) {
       return NextResponse.json({
         response_type: "ephemeral",
-        text: `Could not find owner in: \`${text}\`\nParsed: ${JSON.stringify({ owner: parsed.ownerSlackId, desc: parsed.description.slice(0, 50) })}\n\nPlease tag an owner: \`/task @someone description\``,
+        text: "Please tag an owner: `/task @someone description`",
       });
     }
 
