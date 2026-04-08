@@ -14,42 +14,41 @@ import { PRIORITY_LABELS } from "@/lib/constants";
  */
 async function resolveNameToSlackId(name: string): Promise<string | null> {
   const lower = name.toLowerCase();
-  const member = await prisma.slackMember.findFirst({
-    where: {
-      isActive: true,
-      isBot: false,
-      OR: [
-        { displayName: { equals: lower } },
-        { realName: { equals: lower } },
-      ],
-    },
-    select: { slackId: true },
-  });
-  if (member) return member.slackId;
 
-  // Fuzzy: try partial match (e.g. "@tiffany" matches "tiffanypan")
+  // Fetch all active non-bot members and do case-insensitive matching in JS
+  // (SQLite `equals` is case-sensitive)
   const allMembers = await prisma.slackMember.findMany({
     where: { isActive: true, isBot: false },
     select: { slackId: true, displayName: true, realName: true },
   });
 
-  // Also check system users by name
-  const user = await prisma.user.findFirst({
-    where: {
-      isActive: true,
-      slackId: { not: null },
-      OR: [
-        { name: { contains: name } },
-      ],
-    },
-    select: { slackId: true },
-  });
-  if (user?.slackId) return user.slackId;
-
+  // Exact match (case-insensitive)
   for (const m of allMembers) {
     const dn = (m.displayName || "").toLowerCase();
     const rn = (m.realName || "").toLowerCase();
-    if (dn.startsWith(lower) || rn.startsWith(lower) || rn.includes(lower)) {
+    if (dn === lower || rn === lower) return m.slackId;
+    // Also match without spaces (e.g. "timchen" → "Tim Chen")
+    if (rn.replace(/\s+/g, "") === lower || dn.replace(/\s+/g, "") === lower) return m.slackId;
+  }
+
+  // Also check system users by name
+  const allUsers = await prisma.user.findMany({
+    where: { isActive: true, slackId: { not: null } },
+    select: { slackId: true, name: true },
+  });
+  for (const u of allUsers) {
+    if (!u.slackId || !u.name) continue;
+    const un = u.name.toLowerCase();
+    if (un === lower || un.replace(/\s+/g, "") === lower || un.includes(lower)) {
+      return u.slackId;
+    }
+  }
+
+  // Fuzzy: partial/prefix match (e.g. "@tiffany" matches "tiffanypan")
+  for (const m of allMembers) {
+    const dn = (m.displayName || "").toLowerCase();
+    const rn = (m.realName || "").toLowerCase();
+    if (dn.startsWith(lower) || rn.startsWith(lower) || rn.includes(lower) || dn.includes(lower)) {
       return m.slackId;
     }
   }
@@ -238,7 +237,7 @@ async function parseInlineCommand(text: string): Promise<ParsedCommand> {
     remaining = remaining.replace(mentionMatch[0], "").trim();
   } else {
     // Plain @name — Slack doesn't convert mentions in slash command text
-    const plainMention = remaining.match(/^@(\S+)/);
+    const plainMention = remaining.match(/@(\S+)/);
     if (plainMention) {
       const name = plainMention[1];
       ownerSlackId = await resolveNameToSlackId(name);
@@ -257,6 +256,26 @@ async function parseInlineCommand(text: string): Promise<ParsedCommand> {
   if (isoMatch) {
     deadline = isoMatch[1];
     remaining = remaining.replace(isoMatch[0], "").trim();
+  }
+
+  // US-style date: 4/22, 04/22, by 4/22
+  if (!deadline) {
+    const usMatch = remaining.match(/\b(?:by|before|due)\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/i)
+      || remaining.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+    if (usMatch) {
+      const month = usMatch[1].padStart(2, "0");
+      const day = usMatch[2].padStart(2, "0");
+      let year = usMatch[3]
+        ? (usMatch[3].length === 2 ? `20${usMatch[3]}` : usMatch[3])
+        : String(new Date().getFullYear());
+      // If date already passed this year, assume next year
+      const candidate = new Date(`${year}-${month}-${day}`);
+      if (candidate < new Date() && !usMatch[3]) {
+        year = String(new Date().getFullYear() + 1);
+      }
+      deadline = `${year}-${month}-${day}`;
+      remaining = remaining.replace(usMatch[0], "").trim();
+    }
   }
 
   // "by Friday", "by next week", "by tomorrow", etc.
