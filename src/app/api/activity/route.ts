@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STATUS_LABELS, PRIORITY_LABELS } from "@/lib/constants";
+import { format } from "date-fns";
+
+/** Format ISO timestamp as readable date, or return as-is */
+function fmtDate(value: string | null): string {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    try { return format(new Date(value), "MMM d, yyyy"); } catch { return value.split("T")[0]; }
+  }
+  return value;
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -44,14 +54,14 @@ export async function GET(req: Request) {
       description = `Reassigned task`;
     } else if (log.field === "deadline") {
       if (log.note?.startsWith("Extension approved")) {
-        description = `Extension approved: deadline changed from ${log.oldValue} to ${log.newValue}`;
+        description = `Extension approved: deadline changed from ${fmtDate(log.oldValue)} to ${fmtDate(log.newValue)}`;
       } else {
-        description = `Changed deadline from ${log.oldValue} to ${log.newValue}`;
+        description = `Changed deadline from ${fmtDate(log.oldValue)} to ${fmtDate(log.newValue)}`;
       }
     } else if (log.field === "extension_requested") {
-      description = `Requested deadline extension from ${log.oldValue} to ${log.newValue}`;
+      description = `Requested deadline extension from ${fmtDate(log.oldValue)} to ${fmtDate(log.newValue)}`;
     } else if (log.field === "extension_denied") {
-      description = `Extension request denied (requested: ${log.newValue})`;
+      description = `Extension request denied (requested: ${fmtDate(log.newValue)})`;
     } else {
       description = `Updated ${log.field}`;
       if (log.oldValue && log.newValue) {

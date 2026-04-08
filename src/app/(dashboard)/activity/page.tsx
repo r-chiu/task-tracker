@@ -37,9 +37,24 @@ const FIELD_COLORS: Record<string, string> = {
   priority: "bg-orange-100 text-orange-700",
   ownerId: "bg-purple-100 text-purple-700",
   deadline: "bg-yellow-100 text-yellow-700",
+  extension_requested: "bg-blue-100 text-blue-700",
+  extension_denied: "bg-red-100 text-red-700",
   title: "bg-slate-100 text-slate-600",
   description: "bg-slate-100 text-slate-600",
   notes: "bg-slate-100 text-slate-600",
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  created: "Create",
+  status: "Status",
+  priority: "Priority",
+  ownerId: "Reassign",
+  deadline: "Deadline",
+  extension_requested: "📝 Extension",
+  extension_denied: "❌ Denied",
+  title: "Title",
+  description: "Description",
+  notes: "Notes",
 };
 
 export default function ActivityPage() {
@@ -113,15 +128,33 @@ export default function ActivityPage() {
                     {log.userName}
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant="secondary"
-                      className={FIELD_COLORS[log.field] || "bg-slate-100 text-slate-600"}
-                    >
-                      {log.field === "created" ? "Create" : log.field === "ownerId" ? "Reassign" : log.field.charAt(0).toUpperCase() + log.field.slice(1)}
-                    </Badge>
+                    {(() => {
+                      // Extension approved gets special green badge
+                      const isApproval = log.field === "deadline" && log.description.startsWith("Extension approved");
+                      const badgeField = isApproval ? "extension_approved" : log.field;
+                      const badgeColor = isApproval
+                        ? "bg-green-100 text-green-700"
+                        : (FIELD_COLORS[log.field] || "bg-slate-100 text-slate-600");
+                      const badgeLabel = isApproval
+                        ? "✅ Approved"
+                        : (FIELD_LABELS[badgeField] || log.field.charAt(0).toUpperCase() + log.field.slice(1));
+                      return (
+                        <Badge variant="secondary" className={badgeColor}>
+                          {badgeLabel}
+                        </Badge>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-sm">
-                    {log.description}
+                    <span>{log.description}</span>
+                    {log.note && (log.field === "extension_requested" || log.field === "extension_denied" || (log.field === "deadline" && log.note.startsWith("Extension"))) && (
+                      <span className="block text-xs text-muted-foreground mt-0.5">
+                        {log.note
+                          .replace(/^Extension requested:\s*/, "Reason: ")
+                          .replace(/^Extension approved:\s*/, "Reason: ")
+                          .replace(/^Extension denied\.\s*Requested reason:\s*/, "Reason: ")}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-sm">
                     <Link
