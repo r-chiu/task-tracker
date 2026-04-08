@@ -19,38 +19,41 @@ async function resolveNameToSlackId(name: string): Promise<string | null> {
   // (SQLite `equals` is case-sensitive)
   const allMembers = await prisma.slackMember.findMany({
     where: { isActive: true, isBot: false },
-    select: { slackId: true, displayName: true, realName: true },
+    select: { slackId: true, displayName: true, realName: true, email: true },
   });
 
-  // Exact match (case-insensitive)
+  // Exact match (case-insensitive) on displayName, realName, or email prefix
   for (const m of allMembers) {
     const dn = (m.displayName || "").toLowerCase();
     const rn = (m.realName || "").toLowerCase();
-    if (dn === lower || rn === lower) return m.slackId;
-    // Also match without spaces (e.g. "timchen" → "Tim Chen")
-    if (rn.replace(/\s+/g, "") === lower || dn.replace(/\s+/g, "") === lower) return m.slackId;
+    const emailPrefix = (m.email || "").split("@")[0].toLowerCase();
+    if (dn === lower || rn === lower || emailPrefix === lower) return m.slackId;
+    // Also match without spaces/dots (e.g. "timchen" → "Tim Chen", "tim.chen1108" → "timchen1108")
+    const lowerClean = lower.replace(/[\s.]+/g, "");
+    if (rn.replace(/\s+/g, "") === lowerClean || dn.replace(/[\s.]+/g, "") === lowerClean) return m.slackId;
+    if (emailPrefix.replace(/\./g, "") === lowerClean) return m.slackId;
   }
 
   // Also check system users by name
   const allUsers = await prisma.user.findMany({
     where: { isActive: true, slackId: { not: null } },
-    select: { slackId: true, name: true },
+    select: { slackId: true, name: true, email: true },
   });
   for (const u of allUsers) {
     if (!u.slackId || !u.name) continue;
     const un = u.name.toLowerCase();
-    if (un === lower || un.replace(/\s+/g, "") === lower || un.includes(lower)) {
-      return u.slackId;
-    }
+    const ue = (u.email || "").split("@")[0].toLowerCase();
+    if (un === lower || un.replace(/\s+/g, "") === lower || un.includes(lower)) return u.slackId;
+    if (ue === lower) return u.slackId;
   }
 
-  // Fuzzy: partial/prefix match (e.g. "@tiffany" matches "tiffanypan")
+  // Fuzzy: partial/prefix match on displayName, realName, or email prefix
   for (const m of allMembers) {
     const dn = (m.displayName || "").toLowerCase();
     const rn = (m.realName || "").toLowerCase();
-    if (dn.startsWith(lower) || rn.startsWith(lower) || rn.includes(lower) || dn.includes(lower)) {
-      return m.slackId;
-    }
+    const emailPrefix = (m.email || "").split("@")[0].toLowerCase();
+    if (dn.startsWith(lower) || rn.startsWith(lower) || rn.includes(lower) || dn.includes(lower)) return m.slackId;
+    if (emailPrefix.startsWith(lower) || lower.startsWith(emailPrefix)) return m.slackId;
   }
 
   return null;
