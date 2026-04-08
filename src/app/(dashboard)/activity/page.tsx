@@ -104,8 +104,8 @@ export default function ActivityPage() {
                 <TableHead className="w-[160px]">Time</TableHead>
                 <TableHead className="w-[130px]">User</TableHead>
                 <TableHead className="w-[90px]">Type</TableHead>
-                <TableHead>Description</TableHead>
                 <TableHead className="w-[200px]">Task</TableHead>
+                <TableHead>Description</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -146,6 +146,14 @@ export default function ActivityPage() {
                     })()}
                   </TableCell>
                   <TableCell className="text-sm">
+                    <Link
+                      href={`/tasks/${log.taskId}`}
+                      className="text-primary hover:underline truncate block max-w-[200px]"
+                    >
+                      {log.taskLabel}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-sm">
                     <span>{log.description}</span>
                     {log.note && (log.field === "extension_requested" || log.field === "extension_denied" || (log.field === "deadline" && log.note.startsWith("Extension"))) && (
                       <span className="block text-xs text-muted-foreground mt-0.5">
@@ -155,14 +163,6 @@ export default function ActivityPage() {
                           .replace(/^Extension denied\.\s*Requested reason:\s*/, "Reason: ")}
                       </span>
                     )}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <Link
-                      href={`/tasks/${log.taskId}`}
-                      className="text-primary hover:underline truncate block max-w-[200px]"
-                    >
-                      {log.taskLabel}
-                    </Link>
                   </TableCell>
                 </TableRow>
               ))}
