@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack-verify";
 import { resolveSlackUser } from "@/lib/slack-user-resolver";
 import { sendSlackMessage, sendSlackDM, slackClient } from "@/lib/slack";
-import { buildTaskConfirmationBlocks } from "@/lib/slack-blocks";
+import { buildTaskConfirmationBlocks, buildTaskModalWithDescription } from "@/lib/slack-blocks";
 import { generateTitle } from "@/lib/slack-parser";
 import { aiGenerateTitle } from "@/lib/ai-parser";
 import { prisma } from "@/lib/prisma";
@@ -36,6 +36,40 @@ export async function POST(req: Request) {
   }
 
   const type = payload.type as string;
+
+  // ── Message shortcut: "Create Task" from message context menu ──
+  if (type === "message_action") {
+    const callbackId = payload.callback_id as string;
+
+    if (callbackId === "create_task_from_message") {
+      try {
+        const triggerId = payload.trigger_id as string;
+        const message = payload.message as Record<string, unknown>;
+        const channel = payload.channel as Record<string, string>;
+        const userId = (payload.user as Record<string, string>)?.id || "";
+        const messageText = (message?.text as string) || "";
+        const channelId = channel?.id || "";
+        const channelName = channel?.name || "";
+
+        const metadata = JSON.stringify({
+          channelId,
+          channelName,
+          userId,
+          messageTs: message?.ts,
+          threadTs: message?.thread_ts || message?.ts,
+        });
+
+        await slackClient.views.open({
+          trigger_id: triggerId,
+          view: buildTaskModalWithDescription(messageText, metadata) as never,
+        });
+      } catch (err) {
+        console.error("Failed to open task modal from message shortcut:", err);
+      }
+
+      return new Response("", { status: 200 });
+    }
+  }
 
   // ── Modal submission ──
   if (type === "view_submission") {

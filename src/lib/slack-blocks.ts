@@ -69,6 +69,72 @@ export function buildTaskModal(privateMetadata?: string) {
 }
 
 /**
+ * Build the modal view for task creation with a pre-filled description
+ * (used by message shortcuts — "Create Task" from message context menu).
+ */
+export function buildTaskModalWithDescription(description: string, privateMetadata?: string) {
+  return {
+    type: "modal" as const,
+    callback_id: "task_create_modal",
+    title: { type: "plain_text" as const, text: "Create Task" },
+    submit: { type: "plain_text" as const, text: "Create" },
+    close: { type: "plain_text" as const, text: "Cancel" },
+    private_metadata: privateMetadata || "",
+    blocks: [
+      {
+        type: "input",
+        block_id: "description_block",
+        label: { type: "plain_text", text: "Task Description" },
+        element: {
+          type: "plain_text_input",
+          action_id: "description_input",
+          initial_value: description.slice(0, 3000), // Slack limit
+          placeholder: { type: "plain_text", text: "e.g. Review the Q2 sales report and prepare summary" },
+          multiline: true,
+        },
+      },
+      {
+        type: "input",
+        block_id: "owner_block",
+        label: { type: "plain_text", text: "Owner" },
+        element: {
+          type: "users_select",
+          action_id: "owner_select",
+          placeholder: { type: "plain_text", text: "Select task owner" },
+        },
+      },
+      {
+        type: "input",
+        block_id: "deadline_block",
+        label: { type: "plain_text", text: "Deadline" },
+        element: {
+          type: "datepicker",
+          action_id: "deadline_picker",
+          placeholder: { type: "plain_text", text: "Select a date" },
+        },
+      },
+      {
+        type: "input",
+        block_id: "priority_block",
+        label: { type: "plain_text", text: "Priority" },
+        element: {
+          type: "static_select",
+          action_id: "priority_select",
+          initial_option: {
+            text: { type: "plain_text", text: "Medium" },
+            value: "MEDIUM",
+          },
+          options: Object.entries(PRIORITY_LABELS).map(([value, text]) => ({
+            text: { type: "plain_text" as const, text: text as string },
+            value,
+          })),
+        },
+      },
+    ],
+  };
+}
+
+/**
  * Build confirmation blocks shown after a task is successfully created.
  */
 export function buildTaskConfirmationBlocks(task: {
