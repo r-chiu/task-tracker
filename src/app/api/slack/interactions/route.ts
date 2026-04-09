@@ -223,12 +223,19 @@ export async function POST(req: Request) {
 
         const requesterSlackId = metadata.requesterSlackId || "";
         const requester = await resolveSlackUser(requesterSlackId);
-        const adminSlackId = process.env.RAY_SLACK_USER_ID;
+        // Send to all admins: RAY_SLACK_USER_ID + ADMIN_SLACK_USER_IDS (comma-separated)
+        const adminIds = [
+          process.env.RAY_SLACK_USER_ID,
+          ...(process.env.ADMIN_SLACK_USER_IDS || "").split(",").map((s) => s.trim()),
+        ].filter((id): id is string => !!id && id.length > 0);
+        // Deduplicate
+        const uniqueAdminIds = [...new Set(adminIds)];
+
         const appUrl = process.env.NEXTAUTH_URL || "";
         const taskLabel = task.title || task.description.slice(0, 200);
 
-        // Send approval request DM to admin (Ray)
-        if (adminSlackId) {
+        // Send approval request DM to all admins
+        if (uniqueAdminIds.length > 0) {
           const approvalBlocks = [
             {
               type: "section",
@@ -295,11 +302,13 @@ export async function POST(req: Request) {
             },
           ];
 
-          sendSlackDM(
-            adminSlackId,
-            `📝 Extension request for: ${taskLabel} — requested by ${requester.userName}`,
-            approvalBlocks
-          ).catch((e) => console.error("Failed to send approval DM:", e));
+          for (const adminId of uniqueAdminIds) {
+            sendSlackDM(
+              adminId,
+              `📝 Extension request for: ${taskLabel} — requested by ${requester.userName}`,
+              approvalBlocks
+            ).catch((e) => console.error(`Failed to send approval DM to ${adminId}:`, e));
+          }
         }
 
         // Record extension request in history
