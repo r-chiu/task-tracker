@@ -14,7 +14,7 @@ import { recordTaskChange } from "@/lib/task-utils";
  *
  * Receives interactive payloads from Slack:
  *   - view_submission: when the task creation modal is submitted
- *   - block_actions: when buttons in messages are clicked (e.g., "View in Task Tracker")
+ *   - block_actions: when buttons in messages are clicked (e.g., "View in Calyx Pulse")
  */
 export async function POST(req: Request) {
   // Verify Slack signature
@@ -331,7 +331,7 @@ export async function POST(req: Request) {
             {
               type: "context",
               elements: [
-                { type: "mrkdwn", text: "Sent by Calyx Task Tracker" },
+                { type: "mrkdwn", text: "Sent by Calyx Pulse" },
               ],
             },
           ];

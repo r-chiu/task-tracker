@@ -367,7 +367,7 @@ export function buildReminderBlocks(task: {
     {
       type: "context",
       elements: [
-        { type: "mrkdwn", text: "Sent by Calyx Task Tracker" },
+        { type: "mrkdwn", text: "Sent by Calyx Pulse" },
       ],
     },
   ];
@@ -421,7 +421,7 @@ export function buildOverdueBlocks(task: {
     {
       type: "context",
       elements: [
-        { type: "mrkdwn", text: "Sent by Calyx Task Tracker" },
+        { type: "mrkdwn", text: "Sent by Calyx Pulse" },
       ],
     },
   ];

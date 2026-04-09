@@ -46,7 +46,7 @@ export function Sidebar() {
       <div className="flex h-14 items-center border-b border-sidebar-border px-6">
         <Link href="/" className="flex items-center gap-2 font-semibold text-white">
           <Image src="/logo.png" alt="Calyx" width={28} height={28} className="h-7 w-7 rounded" />
-          <span>Task Tracker</span>
+          <span>Calyx Pulse</span>
         </Link>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-4">

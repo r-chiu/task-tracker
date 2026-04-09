@@ -9,7 +9,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Task Tracker",
+  title: "Calyx Pulse",
   description: "Employee task tracking and management system",
   icons: {
     icon: "/logo.png",

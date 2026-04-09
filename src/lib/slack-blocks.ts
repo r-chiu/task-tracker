@@ -181,7 +181,7 @@ export function buildTaskConfirmationBlocks(task: {
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "View in Task Tracker" },
+          text: { type: "plain_text", text: "View in Calyx Pulse" },
           url: taskUrl,
           action_id: "view_task",
         },
