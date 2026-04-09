@@ -7,7 +7,7 @@ import { generateTitle } from "@/lib/slack-parser";
 import { aiGenerateTitle } from "@/lib/ai-parser";
 import { prisma } from "@/lib/prisma";
 import { PRIORITY_LABELS } from "@/lib/constants";
-import { recordTaskChange } from "@/lib/task-utils";
+import { recordTaskChange, humanizeSlackText } from "@/lib/task-utils";
 
 /**
  * POST /api/slack/interactions
@@ -47,7 +47,8 @@ export async function POST(req: Request) {
         const message = payload.message as Record<string, unknown>;
         const channel = payload.channel as Record<string, string>;
         const userId = (payload.user as Record<string, string>)?.id || "";
-        const messageText = (message?.text as string) || "";
+        const rawText = (message?.text as string) || "";
+        const messageText = await humanizeSlackText(rawText);
         const channelId = channel?.id || "";
         const channelName = channel?.name || "";
 
