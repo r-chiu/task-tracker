@@ -52,6 +52,7 @@ export function TaskHistory({ history }: { history: HistoryEntry[] }) {
           entry.field === "extension_denied" ? "border-red-400" :
           entry.field === "deadline" && entry.note?.startsWith("Extension approved") ? "border-green-400" :
           entry.field === "created" ? "border-emerald-400" :
+          (entry.field === "status" && entry.newValue === "DELETED") ? "border-red-400" :
           "border-muted";
 
         return (

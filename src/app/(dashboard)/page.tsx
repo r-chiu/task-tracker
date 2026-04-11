@@ -72,7 +72,7 @@ export default function DashboardPage() {
   };
 
   const activeTasks = useMemo(
-    () => tasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED"),
+    () => tasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED" && t.status !== "DELETED"),
     [tasks]
   );
   const completedTasks = useMemo(

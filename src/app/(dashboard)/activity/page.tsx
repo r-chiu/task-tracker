@@ -129,15 +129,19 @@ export default function ActivityPage() {
                   </TableCell>
                   <TableCell>
                     {(() => {
-                      // Extension approved gets special green badge
+                      // Special badges for specific events
                       const isApproval = log.field === "deadline" && log.description.startsWith("Extension approved");
-                      const badgeField = isApproval ? "extension_approved" : log.field;
+                      const isDeletion = log.field === "status" && log.description.includes('"Deleted"');
                       const badgeColor = isApproval
                         ? "bg-green-100 text-green-700"
+                        : isDeletion
+                        ? "bg-red-100 text-red-700"
                         : (FIELD_COLORS[log.field] || "bg-slate-100 text-slate-600");
                       const badgeLabel = isApproval
                         ? "✅ Approved"
-                        : (FIELD_LABELS[badgeField] || log.field.charAt(0).toUpperCase() + log.field.slice(1));
+                        : isDeletion
+                        ? "🗑 Deleted"
+                        : (FIELD_LABELS[log.field] || log.field.charAt(0).toUpperCase() + log.field.slice(1));
                       return (
                         <Badge variant="secondary" className={badgeColor}>
                           {badgeLabel}

@@ -87,7 +87,26 @@ export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await getCurrentUser();
   const { id } = await params;
-  await prisma.task.delete({ where: { id } });
+
+  const task = await prisma.task.findUnique({ where: { id } });
+  if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+
+  // Soft delete: mark as DELETED and record who deleted it
+  await prisma.task.update({
+    where: { id },
+    data: { status: "DELETED" },
+  });
+
+  await recordTaskChange(
+    id,
+    user.id,
+    "status",
+    task.status,
+    "DELETED",
+    `Deleted task "${task.title || task.description.slice(0, 50)}"`
+  );
+
   return NextResponse.json({ success: true });
 }

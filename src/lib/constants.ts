@@ -1,4 +1,4 @@
-export type TaskStatus = "ACTIVE" | "WAITING_ON_OTHERS" | "COMPLETED" | "CANCELLED";
+export type TaskStatus = "ACTIVE" | "WAITING_ON_OTHERS" | "COMPLETED" | "CANCELLED" | "DELETED";
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type SourceType = "MANUAL" | "SLACK_MESSAGE" | "MEETING_NOTES" | "TRANSCRIPT" | "VIDEO_RECORDING" | "OTHER";
 export type Role = "ADMIN" | "MANAGER" | "VIEWER";
@@ -8,6 +8,7 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   WAITING_ON_OTHERS: "Waiting on Others",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
+  DELETED: "Deleted",
 };
 
 export const STATUS_COLORS: Record<TaskStatus, string> = {
@@ -15,6 +16,7 @@ export const STATUS_COLORS: Record<TaskStatus, string> = {
   WAITING_ON_OTHERS: "bg-yellow-100 text-yellow-700",
   COMPLETED: "bg-green-100 text-green-700",
   CANCELLED: "bg-gray-100 text-gray-500 line-through",
+  DELETED: "bg-red-50 text-red-400 line-through",
 };
 
 export const PRIORITY_LABELS: Record<TaskPriority, string> = {

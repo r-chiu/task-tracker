@@ -35,10 +35,13 @@ export async function GET(req: Request) {
   const limit = parseInt(searchParams.get("limit") || "50");
 
   const where: Record<string, unknown> = {};
+  // Always exclude soft-deleted tasks unless explicitly requested
   if (owner) where.ownerId = owner;
   if (status) {
     const statuses = status.split(",");
     where.status = { in: statuses };
+  } else {
+    where.status = { not: "DELETED" };
   }
   if (priority) {
     const priorities = priority.split(",");
