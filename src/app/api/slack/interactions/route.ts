@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack-verify";
 import { resolveSlackUser } from "@/lib/slack-user-resolver";
-import { sendSlackMessage, sendSlackDM, slackClient } from "@/lib/slack";
+import { sendSlackMessage, sendSlackDM, slackClient, getSlackPermalink } from "@/lib/slack";
 import { buildTaskConfirmationBlocks, buildTaskModalWithDescription } from "@/lib/slack-blocks";
 import { generateTitle } from "@/lib/slack-parser";
 import { aiGenerateTitle } from "@/lib/ai-parser";
@@ -52,12 +52,20 @@ export async function POST(req: Request) {
         const channelId = channel?.id || "";
         const channelName = channel?.name || "";
 
+        // Generate Slack permalink for the source message
+        const messageTs = (message?.ts as string) || "";
+        let slackMessageLink: string | null = null;
+        if (channelId && messageTs) {
+          slackMessageLink = await getSlackPermalink(channelId, messageTs);
+        }
+
         const metadata = JSON.stringify({
           channelId,
           channelName,
           userId,
-          messageTs: message?.ts,
+          messageTs,
           threadTs: message?.thread_ts || message?.ts,
+          slackMessageLink,
         });
 
         await slackClient.views.open({
@@ -123,6 +131,12 @@ export async function POST(req: Request) {
         resolveSlackUser(submitterSlackId),
       ]);
 
+      // Parse channel from private_metadata (need slackMessageLink before task creation)
+      let metadata: { channelId?: string; slackMessageLink?: string } = {};
+      try {
+        metadata = JSON.parse((view.private_metadata as string) || "{}");
+      } catch {}
+
       // Generate smart title — try AI first, fall back to regex
       const title = (await aiGenerateTitle(description)) || generateTitle(description);
 
@@ -139,6 +153,7 @@ export async function POST(req: Request) {
           priority,
           status: "ACTIVE",
           sourceType: "SLACK_MESSAGE",
+          slackMessageLink: metadata.slackMessageLink || null,
         },
       });
 
@@ -167,12 +182,6 @@ export async function POST(req: Request) {
       });
 
       const confirmText = `✅ Task created: ${title} | Owner: ${owner.userName} | Due: ${deadlineStr}`;
-
-      // Parse channel from private_metadata
-      let metadata: { channelId?: string } = {};
-      try {
-        metadata = JSON.parse((view.private_metadata as string) || "{}");
-      } catch {}
 
       // Fire-and-forget: send notifications asynchronously so we return
       // the modal response within Slack's 3-second window

@@ -121,6 +121,7 @@ export function TaskForm() {
     sourceType: "MANUAL",
     sourceReference: "",
     slackChannel: "",
+    slackMessageLink: "",
     notes: "",
   });
 
@@ -462,6 +463,11 @@ export function TaskForm() {
         updates.sourceType = "SLACK_MESSAGE";
       }
 
+      // Slack message permalink
+      if (item.slackMessageLink) {
+        updates.slackMessageLink = item.slackMessageLink as string;
+      }
+
       return { ...f, ...updates };
     });
 
@@ -718,6 +724,7 @@ export function TaskForm() {
           sourceType: form.sourceType,
           sourceReference: "",
           slackChannel: "",
+          slackMessageLink: "",
           notes: "",
         });
         setSuggestedOwners([]);

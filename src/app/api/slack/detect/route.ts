@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchChannelMessages } from "@/lib/slack";
+import { fetchChannelMessages, getSlackPermalink } from "@/lib/slack";
 import { aiParseText, aiGenerateTitle } from "@/lib/ai-parser";
 import { scoreSlackMessages } from "@/lib/slack-parser";
 import { prisma } from "@/lib/prisma";
@@ -52,6 +52,7 @@ export async function POST(req: Request) {
       timestamp: string | null;
       ownerGroup: string | null;
       title?: string;
+      slackMessageLink?: string | null;
     }[];
     let parser: string;
 
@@ -116,6 +117,19 @@ export async function POST(req: Request) {
       titleResults.forEach((result, idx) => {
         if (result.status === "fulfilled" && result.value) {
           needsTitles[idx].title = result.value;
+        }
+      });
+    }
+
+    // Generate Slack permalinks for items that have timestamps
+    const itemsWithTs = items.filter((item) => item.timestamp);
+    if (itemsWithTs.length > 0) {
+      const linkResults = await Promise.allSettled(
+        itemsWithTs.map((item) => getSlackPermalink(channelId, item.timestamp!))
+      );
+      linkResults.forEach((result, idx) => {
+        if (result.status === "fulfilled" && result.value) {
+          itemsWithTs[idx].slackMessageLink = result.value;
         }
       });
     }

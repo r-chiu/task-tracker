@@ -23,7 +23,7 @@ import { DeadlineExtensionDialog } from "@/components/tasks/deadline-extension-d
 import { STATUS_LABELS, PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/constants";
 import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
-import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 export default function TaskDetailPage() {
@@ -162,6 +162,18 @@ export default function TaskDetailPage() {
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
+                  {task.slackMessageLink && (
+                    <a
+                      href={task.slackMessageLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-[#4A154B] transition-colors px-1.5 py-0.5 rounded border border-transparent hover:border-[#4A154B]/20 hover:bg-[#4A154B]/5"
+                      title="View original Slack message"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      <span>Slack</span>
+                    </a>
+                  )}
                 </div>
               )}
               {task.title && task.description && !editingTitle && (

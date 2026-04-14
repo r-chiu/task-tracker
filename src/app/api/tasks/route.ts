@@ -13,6 +13,7 @@ const createTaskSchema = z.object({
   sourceType: z.enum(["MANUAL", "SLACK_MESSAGE", "MEETING_NOTES", "TRANSCRIPT", "VIDEO_RECORDING", "OTHER"]).optional(),
   sourceReference: z.string().optional(),
   slackChannel: z.string().optional(),
+  slackMessageLink: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -132,7 +133,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.issues }, { status: 400 });
   }
 
-  const { title, description, ownerId, deadline, priority, sourceType, sourceReference, slackChannel, notes } = parsed.data;
+  const { title, description, ownerId, deadline, priority, sourceType, sourceReference, slackChannel, slackMessageLink, notes } = parsed.data;
 
   try {
     const task = await prisma.task.create({
@@ -146,6 +147,7 @@ export async function POST(req: Request) {
         priority: priority ?? "MEDIUM",
         sourceType: sourceType ?? "MANUAL",
         sourceReference,
+        slackMessageLink,
         slackChannel,
         notes,
       },

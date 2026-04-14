@@ -80,6 +80,7 @@ model Task {
   status           String    @default("ACTIVE")
   sourceType       String    @default("MANUAL")
   sourceReference  String?
+  slackMessageLink String?
   slackChannel     String?
   notes            String?
   isOverdue        Boolean   @default(false)

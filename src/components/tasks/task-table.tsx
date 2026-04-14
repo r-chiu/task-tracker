@@ -15,7 +15,7 @@ import { TaskPriorityBadge } from "./task-priority-badge";
 import { format } from "date-fns";
 import { toZonedTime } from "date-fns-tz";
 import { TAIPEI_TIMEZONE, STATUS_LABELS, PRIORITY_LABELS, TaskStatus, TaskPriority } from "@/lib/constants";
-import { ArrowUpDown, AlarmClock, Trash2 } from "lucide-react";
+import { ArrowUpDown, AlarmClock, Trash2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -36,6 +36,7 @@ interface TaskRow {
   revisedDeadline: string | null;
   createdAt: string;
   owner: { id: string; name: string | null; email: string };
+  slackMessageLink?: string | null;
 }
 
 function deadlineColor(deadline: string, isOverdue: boolean, status: string): string {
@@ -249,6 +250,18 @@ export function TaskTable({
                       >
                         {task.title || task.description}
                       </Link>
+                      {task.slackMessageLink && (
+                        <a
+                          href={task.slackMessageLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 text-muted-foreground hover:text-[#4A154B] p-0.5"
+                          title="View original Slack message"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.124 2.521a2.528 2.528 0 0 1 2.52-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.52V8.834zm-1.271 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.166 0a2.528 2.528 0 0 1 2.521 2.522v6.312zm-2.521 10.124a2.528 2.528 0 0 1 2.521 2.52A2.528 2.528 0 0 1 15.166 24a2.528 2.528 0 0 1-2.521-2.522v-2.52h2.521zm0-1.271a2.528 2.528 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.312A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.521h-6.312z"/></svg>
+                        </a>
+                      )}
                       {onTitleChange && (
                         <button
                           type="button"

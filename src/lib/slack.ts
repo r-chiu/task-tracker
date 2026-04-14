@@ -25,6 +25,16 @@ export async function sendSlackMessage(channel: string, text: string, blocks?: u
   });
 }
 
+export async function getSlackPermalink(channel: string, messageTs: string): Promise<string | null> {
+  try {
+    const result = await slack.chat.getPermalink({ channel, message_ts: messageTs });
+    return result.permalink || null;
+  } catch (e) {
+    console.error("Failed to get Slack permalink:", e);
+    return null;
+  }
+}
+
 export async function fetchSlackMembers() {
   const members: {
     slackId: string;
