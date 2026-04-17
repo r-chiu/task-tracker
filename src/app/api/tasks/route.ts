@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/mock-user";
 import { humanizeTasks, isTaskOverdue } from "@/lib/task-utils";
+import { sendSlackDM } from "@/lib/slack";
+import { buildTaskConfirmationBlocks } from "@/lib/slack-blocks";
+import { PRIORITY_LABELS } from "@/lib/constants";
 import { z } from "zod/v4";
 
 const createTaskSchema = z.object({
@@ -152,7 +155,8 @@ export async function POST(req: Request) {
         notes,
       },
       include: {
-        owner: { select: { id: true, name: true, email: true } },
+        owner: { select: { id: true, name: true, email: true, slackId: true, slackDisplayName: true } },
+        creator: { select: { id: true, name: true, email: true, slackId: true } },
       },
     });
 
@@ -165,6 +169,31 @@ export async function POST(req: Request) {
         newValue: "Task created",
       },
     });
+
+    // Fire-and-forget: DM the owner if different from creator (web UI task creation)
+    if (task.owner.slackId && task.owner.id !== task.creator.id) {
+      const priorityLabel =
+        PRIORITY_LABELS[(task.priority ?? "MEDIUM") as keyof typeof PRIORITY_LABELS] ||
+        (task.priority ?? "MEDIUM");
+      const deadlineStr = new Date(task.deadline).toLocaleDateString("en-US", {
+        year: "numeric", month: "short", day: "numeric",
+      });
+      const appUrl = process.env.NEXTAUTH_URL || "";
+      const taskTitle = task.title || (task.description || "").slice(0, 80) || "New task";
+      const blocks = buildTaskConfirmationBlocks({
+        title: taskTitle,
+        ownerName: task.owner.slackDisplayName || task.owner.name || task.owner.email,
+        deadline: deadlineStr,
+        priority: priorityLabel,
+        id: task.id,
+        creatorName: task.creator.name || task.creator.email,
+        appUrl,
+      });
+      const dmText = `📋 New task assigned to you: *${taskTitle}*\nDeadline: ${deadlineStr} | Priority: ${priorityLabel}`;
+      sendSlackDM(task.owner.slackId, dmText, blocks).catch((e) => {
+        console.error("Failed to send task assignment DM:", e);
+      });
+    }
 
     return NextResponse.json(task, { status: 201 });
   } catch (err) {
