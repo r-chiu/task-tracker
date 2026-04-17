@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack-verify";
 import { resolveSlackUser } from "@/lib/slack-user-resolver";
-import { slackClient, sendSlackMessage } from "@/lib/slack";
+import { slackClient, sendSlackMessage, sendSlackDM } from "@/lib/slack";
 import { buildTaskModal, buildTaskConfirmationBlocks, buildErrorBlocks } from "@/lib/slack-blocks";
 import { generateTitle } from "@/lib/slack-parser";
 import { aiGenerateTitle } from "@/lib/ai-parser";
@@ -173,6 +173,27 @@ export async function POST(req: Request) {
       );
     } catch {
       // Channel post failed (bot may not be in channel) — that's ok
+    }
+
+    // DM the owner (if different from creator) and admins for manager visibility
+    const notified = new Set<string>([userId]);
+    if (parsed.ownerSlackId && parsed.ownerSlackId !== userId) {
+      sendSlackDM(
+        parsed.ownerSlackId,
+        `📋 New task assigned to you: *${title}*\nDeadline: ${deadline} | Priority: ${priorityLabel}`,
+        blocks
+      ).catch(() => {});
+      notified.add(parsed.ownerSlackId);
+    }
+    const adminIds = [
+      process.env.RAY_SLACK_USER_ID,
+      ...(process.env.ADMIN_SLACK_USER_IDS || "").split(",").map((s) => s.trim()),
+    ].filter((id): id is string => !!id && id.length > 0);
+    const adminText = `🆕 New task created by *${creator.userName}*\n*${title}*\nOwner: ${owner.userName} | Deadline: ${deadline} | Priority: ${priorityLabel}`;
+    for (const adminId of [...new Set(adminIds)]) {
+      if (notified.has(adminId)) continue;
+      sendSlackDM(adminId, adminText, blocks).catch(() => {});
+      notified.add(adminId);
     }
 
     // Return ephemeral confirmation to the user

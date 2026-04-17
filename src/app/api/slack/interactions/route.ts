@@ -187,16 +187,30 @@ export async function POST(req: Request) {
       // the modal response within Slack's 3-second window
       const notifyAsync = async () => {
         try {
+          const notified = new Set<string>();
           if (metadata.channelId) {
             await sendSlackMessage(metadata.channelId, confirmText, blocks).catch(() => {});
           }
           await sendSlackDM(submitterSlackId, confirmText, blocks).catch(() => {});
-          if (owner.userId !== creator.userId) {
+          notified.add(submitterSlackId);
+          if (owner.userId !== creator.userId && !notified.has(ownerSlackId)) {
             await sendSlackDM(
               ownerSlackId,
               `📋 New task assigned to you: *${title}*\nDeadline: ${deadlineStr} | Priority: ${priorityLabel}`,
               blocks
             ).catch(() => {});
+            notified.add(ownerSlackId);
+          }
+          // Notify admins for manager visibility
+          const adminIds = [
+            process.env.RAY_SLACK_USER_ID,
+            ...(process.env.ADMIN_SLACK_USER_IDS || "").split(",").map((s) => s.trim()),
+          ].filter((id): id is string => !!id && id.length > 0);
+          const adminText = `🆕 New task created by *${creator.userName}*\n*${title}*\nOwner: ${owner.userName} | Deadline: ${deadlineStr} | Priority: ${priorityLabel}`;
+          for (const adminId of [...new Set(adminIds)]) {
+            if (notified.has(adminId)) continue;
+            await sendSlackDM(adminId, adminText, blocks).catch(() => {});
+            notified.add(adminId);
           }
         } catch (e) {
           console.error("Async notification error:", e);

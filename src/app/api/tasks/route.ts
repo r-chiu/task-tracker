@@ -170,29 +170,55 @@ export async function POST(req: Request) {
       },
     });
 
-    // Fire-and-forget: DM the owner if different from creator (web UI task creation)
+    // Fire-and-forget Slack notifications for web UI task creation
+    const priorityLabel =
+      PRIORITY_LABELS[(task.priority ?? "MEDIUM") as keyof typeof PRIORITY_LABELS] ||
+      (task.priority ?? "MEDIUM");
+    const deadlineStr = new Date(task.deadline).toLocaleDateString("en-US", {
+      year: "numeric", month: "short", day: "numeric",
+    });
+    const appUrl = process.env.NEXTAUTH_URL || "";
+    const taskTitle = task.title || (task.description || "").slice(0, 80) || "New task";
+    const creatorName = task.creator.name || task.creator.email;
+    const ownerName = task.owner.slackDisplayName || task.owner.name || task.owner.email;
+    const blocks = buildTaskConfirmationBlocks({
+      title: taskTitle,
+      ownerName,
+      deadline: deadlineStr,
+      priority: priorityLabel,
+      id: task.id,
+      creatorName,
+      appUrl,
+    });
+
+    // Track who has already been notified so we don't double-DM
+    const notified = new Set<string>();
+
+    // 1. DM the owner if different from creator
     if (task.owner.slackId && task.owner.id !== task.creator.id) {
-      const priorityLabel =
-        PRIORITY_LABELS[(task.priority ?? "MEDIUM") as keyof typeof PRIORITY_LABELS] ||
-        (task.priority ?? "MEDIUM");
-      const deadlineStr = new Date(task.deadline).toLocaleDateString("en-US", {
-        year: "numeric", month: "short", day: "numeric",
+      const ownerText = `📋 New task assigned to you: *${taskTitle}*\nDeadline: ${deadlineStr} | Priority: ${priorityLabel}`;
+      sendSlackDM(task.owner.slackId, ownerText, blocks).catch((e) => {
+        console.error("Failed to send owner DM:", e);
       });
-      const appUrl = process.env.NEXTAUTH_URL || "";
-      const taskTitle = task.title || (task.description || "").slice(0, 80) || "New task";
-      const blocks = buildTaskConfirmationBlocks({
-        title: taskTitle,
-        ownerName: task.owner.slackDisplayName || task.owner.name || task.owner.email,
-        deadline: deadlineStr,
-        priority: priorityLabel,
-        id: task.id,
-        creatorName: task.creator.name || task.creator.email,
-        appUrl,
+      notified.add(task.owner.slackId);
+    }
+
+    // 2. DM all admins (Ray + any ADMIN_SLACK_USER_IDS) for manager visibility
+    const adminIds = [
+      process.env.RAY_SLACK_USER_ID,
+      ...(process.env.ADMIN_SLACK_USER_IDS || "").split(",").map((s) => s.trim()),
+    ].filter((id): id is string => !!id && id.length > 0);
+    const uniqueAdminIds = [...new Set(adminIds)];
+    const creatorSlackId = task.creator.slackId;
+    const adminText = `🆕 New task created by *${creatorName}*\n*${taskTitle}*\nOwner: ${ownerName} | Deadline: ${deadlineStr} | Priority: ${priorityLabel}`;
+    for (const adminId of uniqueAdminIds) {
+      // Skip if admin is the creator (they already know) or owner (already DMed above)
+      if (adminId === creatorSlackId) continue;
+      if (notified.has(adminId)) continue;
+      sendSlackDM(adminId, adminText, blocks).catch((e) => {
+        console.error(`Failed to send admin DM to ${adminId}:`, e);
       });
-      const dmText = `📋 New task assigned to you: *${taskTitle}*\nDeadline: ${deadlineStr} | Priority: ${priorityLabel}`;
-      sendSlackDM(task.owner.slackId, dmText, blocks).catch((e) => {
-        console.error("Failed to send task assignment DM:", e);
-      });
+      notified.add(adminId);
     }
 
     return NextResponse.json(task, { status: 201 });
